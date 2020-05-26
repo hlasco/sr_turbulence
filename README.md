@@ -1,2 +1,1 @@
-# PISRT
-Physics-Informed Super-Resolution for Turbulent Flows
+# Physics-Informed Super-Resolution for Turbulent Flows
