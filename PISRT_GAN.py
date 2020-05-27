@@ -115,7 +115,7 @@ class PISRT_GAN():
             x = Conv3D(256,data_format="channels_last", kernel_size=3, strides=1, padding='same')(input)
             x = ops.PixelShuffling(tf.shape(x), name=name, scale=2)(x)
             x = PReLU(alpha_initializer='zeros')(x)
-            return x3
+            return x
 
         def denseBlock(input):
             x1 = Conv3D(64, data_format="channels_last", kernel_size=3, strides=1, padding='same')(input)
@@ -353,10 +353,9 @@ class PISRT_GAN():
         dl = ops.DataLoader(
             self.LR_directory,
             self.HR_directory,
-            batch_size=1
         )
             
-        lr_image, hr_image = dl.loadRandomBatch_noise()
+        lr_image, hr_image = dl.loadRandomBatch_noise(batch_size=1)
         
         # For each epoch, this callback will plot a slice of Low-res/Super-res/High-res channels
         cbImg = cb.ImgCallback(
@@ -372,8 +371,7 @@ class PISRT_GAN():
         
         # Need to handle restart epoch... I think I will just read the csv file
         for epoch in range(n_epochs):
-            dl = ops.DataLoader(self.LR_directory, self.HR_directory, batch_size=batch_size*step_per_epoch)
-            lr_images, hr_images = dl.loadRandomBatch_noise()
+            lr_images, hr_images = dl.loadRandomBatch_noise(batch_size=batch_size*step_per_epoch)
             print("\nEpoch {}/{}".format(epoch+1,n_epochs))
             pb_i = Progbar(step_per_epoch, stateful_metrics=metrics_names, verbose=2)
             for step in range(step_per_epoch):

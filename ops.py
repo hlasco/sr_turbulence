@@ -54,6 +54,15 @@ def PixelShuffling(input_shape, name, scale=2):
         return ret
 
     return Lambda(subpixel, output_shape=subpixel_shape, name=name)
+    
+def normalize(patch):
+    """
+    Normalize a patch of fluid quantities.
+    """
+    mu = np.mean(patch)
+    std = np.std(patch)
+    return (patch-mu)/std
+
 class DataLoader():
     """
     Tool for loading snapshots from a directory
@@ -84,14 +93,6 @@ class DataLoader():
 
         self.LR_fList = sorted(glob.glob(LR_directory+'/*.h5'))
         self.nFiles = len(self.LR_fList)
-        
-    def normalize(patch):
-        """
-        Normalize a patch of fluid quantities.
-        """
-        mu = np.mean(patch)
-        std = np.std(patch)
-        return (patch-mu)/std
 
     def loadRandomBatch(self, batch_size):
         """
@@ -160,7 +161,7 @@ class DataLoader():
 
         return LR_train, HR_train
         
-    def loadRandomBatch_noise(self):
+    def loadRandomBatch_noise(self, batch_size):
         """
         For testing only: put some random numbers in the batch
         """

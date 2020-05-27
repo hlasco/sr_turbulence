@@ -30,9 +30,9 @@ gan = PISRT_GAN(
         HR_patchsize=64,
         output_dir = './rundir',
         lRate_G = 1e-4,
-        lRage_D = 1e-7,
+        lRate_D = 1e-7,
         nChannels=5,
         training_mode=True
     )
-            
-gan.train_generator(batch_size=8, step_per_epoch=4, n_epochs=100)
+
+gan.train_generator(batch_size=2, step_per_epoch=4, n_epochs=100)
