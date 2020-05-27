@@ -1,6 +1,7 @@
 import tensorflow as tf
 from PISRT_GAN import PISRT_GAN
 import os, sys
+
 #import horovod.tensorflow.keras as hvd
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -23,6 +24,15 @@ hr_dir = '/home/cluster/hlasco/scratch/ramses3d/pbox_n50_noGrav/post_processing/
 print('Initializing Networks', flush=True)
 
 gan = PISRT_GAN(
-            LR_directory=lr_dir, HR_directory=hr_dir,
-            LR_patchsize=16, HR_patchsize=64,
-            training_mode=True)
+        LR_directory=lr_dir,
+        HR_directory=hr_dir,
+        LR_patchsize=16,
+        HR_patchsize=64,
+        output_dir = './rundir',
+        lRate_G = 1e-4,
+        lRage_D = 1e-7,
+        nChannels=5,
+        training_mode=True
+    )
+            
+gan.train_generator(batch_size=8, step_per_epoch=4, n_epochs=100)
