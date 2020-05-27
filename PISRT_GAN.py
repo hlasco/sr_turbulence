@@ -23,8 +23,8 @@ class PISRT_GAN():
     """
 
     def __init__(self,
-             LR_directory, HR_directory,
-             LR_patchsize=16, HR_patchsize=64,
+             lr_directory, hr_directory,
+             lr_patchsize=16, hr_patchsize=64,
              nChannels=5,
              batch_size=4,
              lRate_G=1e-4, lRate_D=1e-7,
@@ -35,29 +35,29 @@ class PISRT_GAN():
              refer_model=None,
              ):
         """
-        LR_patchsize: Size of low-resolution data
-        HR_patchsize: Size of high-resolution data
+        lr_patchsize: Size of low-resolution data
+        hr_patchsize: Size of high-resolution data
         nChannels: Number of channels (u,v,w,rho,P)
         batch_size: Batch size
         sr_factor: Super-Resolution factor
         lRate_G: Learning rate of generator
         lRage_D: Learning rate of discriminator
         """
-        self.LR_directory = LR_directory
-        self.HR_directory = HR_directory
+        self.lr_directory = lr_directory
+        self.hr_directory = hr_directory
 
         # Low-resolution image dimensions
-        self.LR_patchsize = LR_patchsize
+        self.lr_patchsize = lr_patchsize
         
         # High-resolution image dimensions
-        self.HR_patchsize = HR_patchsize
+        self.hr_patchsize = hr_patchsize
         
         self.nChannels = nChannels
     
         # Low-resolution and high-resolution shapes
         """ DNS-Data only has one channel, when only using PS field, when using u,v,w,ps, change to 4 channels """
-        self.shape_LR = (self.LR_patchsize, self.LR_patchsize, self.LR_patchsize, self.nChannels)
-        self.shape_HR = (self.HR_patchsize, self.HR_patchsize, self.HR_patchsize, self.nChannels)
+        self.shape_lr = (self.lr_patchsize, self.lr_patchsize, self.lr_patchsize, self.nChannels)
+        self.shape_hr = (self.hr_patchsize, self.hr_patchsize, self.hr_patchsize, self.nChannels)
     
         # Learning rates
         self.lRate_G = lRate_G
@@ -107,8 +107,8 @@ class PISRT_GAN():
         Build the generator network.
         """
         w_init = tf.random_normal_initializer(stddev=0.02)
-        HR_patchsize = self.HR_patchsize
-        LR_patchsize = self.LR_patchsize
+        hr_patchsize = self.hr_patchsize
+        lr_patchsize = self.lr_patchsize
         self.data_format='channels_last'
 
         def upSamplingLayer(input, scale, name):
@@ -152,9 +152,9 @@ class PISRT_GAN():
 
         """----------------Assembly the generator-----------------"""
         # Input low resolution image
-        #shape = (LR_patchsize, LR_patchsize, LR_patchsize, self.nChannels)
-        #lr_input = Input(shape=(LR_patchsize, LR_patchsize, LR_patchsize, self.nChannels))#, batch_size=self.batch_size)
-        lr_input = Input(shape=self.shape_LR)
+        #shape = (lr_patchsize, lr_patchsize, lr_patchsize, self.nChannels)
+        #lr_input = Input(shape=(lr_patchsize, lr_patchsize, lr_patchsize, self.nChannels))#, batch_size=self.batch_size)
+        lr_input = Input(shape=self.shape_lr)
         # Pre-residual
         x_start = Conv3D(64, data_format="channels_last", kernel_size=9, strides=1, padding='same')(lr_input)
         x_start = LeakyReLU(0.2)(x_start)
@@ -205,20 +205,20 @@ class PISRT_GAN():
             return x
 
         # Input high resolution image
-        HR_patch = self.HR_patchsize
-        img = Input(shape=self.shape_HR)
+        hr_patch = self.hr_patchsize
+        img = Input(shape=self.shape_hr)
         
-        x = discriminator_block(img,   HR_patch, 3, strides=2, batchNormalization=False)
-        x = discriminator_block(x,   2*HR_patch, 3, strides=1, batchNormalization=True)
-        x = discriminator_block(x,   2*HR_patch, 3, strides=2, batchNormalization=True)
-        x = discriminator_block(x,   4*HR_patch, 3, strides=1, batchNormalization=True)
-        x = discriminator_block(x,   4*HR_patch, 3, strides=2, batchNormalization=True)
-        x = discriminator_block(x,   8*HR_patch, 3, strides=1, batchNormalization=True)
-        x = discriminator_block(x,   8*HR_patch, 3, strides=2, batchNormalization=True)
-        x = discriminator_block(x,  16*HR_patch, 3, strides=1, batchNormalization=True)
-        x = discriminator_block(x,  16*HR_patch, 3, strides=2, batchNormalization=True)
+        x = discriminator_block(img,   hr_patch, 3, strides=2, batchNormalization=False)
+        x = discriminator_block(x,   2*hr_patch, 3, strides=1, batchNormalization=True)
+        x = discriminator_block(x,   2*hr_patch, 3, strides=2, batchNormalization=True)
+        x = discriminator_block(x,   4*hr_patch, 3, strides=1, batchNormalization=True)
+        x = discriminator_block(x,   4*hr_patch, 3, strides=2, batchNormalization=True)
+        x = discriminator_block(x,   8*hr_patch, 3, strides=1, batchNormalization=True)
+        x = discriminator_block(x,   8*hr_patch, 3, strides=2, batchNormalization=True)
+        x = discriminator_block(x,  16*hr_patch, 3, strides=1, batchNormalization=True)
+        x = discriminator_block(x,  16*hr_patch, 3, strides=2, batchNormalization=True)
         x = Flatten()(x)
-        x = Dense(16*HR_patch)(x)
+        x = Dense(16*hr_patch)(x)
         x = LeakyReLU(alpha=0.2)(x)
         x = Dropout(0.4)(x)
         x = Dense(1, activation='sigmoid')(x)
@@ -240,10 +240,10 @@ class PISRT_GAN():
             real_logit = (real - K.mean(fake))
             return [fake_logit, real_logit]
 
-        # Input HR images
-        HR_size = self.HR_patchsize
-        imgs_hr      = Input(shape=(HR_size, HR_size, HR_size, self.nChannels))
-        generated_hr = Input(shape=(HR_size, HR_size, HR_size, self.nChannels))
+        # Input hr images
+        hr_size = self.hr_patchsize
+        imgs_hr      = Input(shape=(hr_size, hr_size, hr_size, self.nChannels))
+        generated_hr = Input(shape=(hr_size, hr_size, hr_size, self.nChannels))
 
         # Create a high resolution image from the low resolution one
         real_discriminator_logits = self.discriminator(imgs_hr)
@@ -282,9 +282,9 @@ class PISRT_GAN():
             pixel_loss = losses.pixel(img_hr, generated_hr)
             return [grad_loss, gen_loss, pixel_loss]
 
-        # Input LR images
-        img_lr = Input(self.shape_LR)
-        img_hr = Input(self.shape_HR)
+        # Input lr images
+        img_lr = Input(self.shape_lr)
+        img_hr = Input(self.shape_hr)
 
         # Create a high resolution snapshot
         generated_hr = self.generator(img_lr)
@@ -351,8 +351,8 @@ class PISRT_GAN():
         
         # Grab a snapshot for the image callback
         dl = ops.DataLoader(
-            self.LR_directory,
-            self.HR_directory,
+            self.lr_directory,
+            self.hr_directory,
         )
             
         lr_image, hr_image = dl.loadRandomBatch_noise(batch_size=1)

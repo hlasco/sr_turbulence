@@ -69,30 +69,30 @@ class DataLoader():
     """
 
     def __init__(self,
-                 LR_directory,      # Directory containing the High-res snapshots
-                 HR_directory,      # Directory containing the High-res snapshots
-                 HR_boxsize=128,    # High-res full box size
+                 lr_directory,      # Directory containing the High-res snapshots
+                 hr_directory,      # Directory containing the High-res snapshots
+                 hr_boxsize=128,    # High-res full box size
                  sr_factor=4,       # Super-resolution factor
-                 HR_patchsize=64,   # High-res patch size
+                 hr_patchsize=64,   # High-res patch size
                  nChannels=5,       # Number of channels (u,v,w,rho,P)
                  ):
 
-        self.HR_directory = HR_directory
-        self.LR_directory = LR_directory
-        self.HR_boxsize   = HR_boxsize
+        self.hr_directory = hr_directory
+        self.lr_directory = lr_directory
+        self.hr_boxsize   = hr_boxsize
         self.sr_factor    = sr_factor
-        self.HR_patchsize = HR_patchsize
+        self.hr_patchsize = hr_patchsize
         self.nChannels    = nChannels
 
         # Just to read my hdf5 snapshots
         self.channels = ['velocity_x','velocity_y','velocity_z','density','pressure']
 
         # Make sure that your file names can be sorted
-        self.HR_fList = sorted(glob.glob(HR_directory+'/*.h5'))
-        self.HR_nFile = len(self.HR_fList)
+        self.hr_fList = sorted(glob.glob(hr_directory+'/*.h5'))
+        self.hr_nFile = len(self.hr_fList)
 
-        self.LR_fList = sorted(glob.glob(LR_directory+'/*.h5'))
-        self.nFiles = len(self.LR_fList)
+        self.lr_fList = sorted(glob.glob(lr_directory+'/*.h5'))
+        self.nFiles = len(self.lr_fList)
 
     def loadRandomBatch(self, batch_size):
         """
@@ -100,22 +100,22 @@ class DataLoader():
         """
         
         # High-res and Low-res files should go by pair
-        if self.nFiles is not len(self.HR_fList):
-            raise ValueError('HR and LR directories should contain the same number of snapshots \
-                              LR_nFile={}, HR_nFile={}'.format(self.nFiles, len(self.HR_fList)))
+        if self.nFiles is not len(self.hr_fList):
+            raise ValueError('hr and lr directories should contain the same number of snapshots \
+                              lr_nFile={}, hr_nFile={}'.format(self.nFiles, len(self.hr_fList)))
 
-        ps_lr = self.HR_patchsize // self.sr_factor
-        ps_hr = self.HR_patchsize
+        ps_lr = self.hr_patchsize // self.sr_factor
+        ps_hr = self.hr_patchsize
 
-        LR_train = np.zeros([batch_size,ps_lr,ps_lr,ps_lr,self.nChannels] )
-        HR_train = np.zeros([batch_size,ps_hr,ps_hr,ps_hr,self.nChannels] )
+        lr_train = np.zeros([batch_size,ps_lr,ps_lr,ps_lr,self.nChannels] )
+        hr_train = np.zeros([batch_size,ps_hr,ps_hr,ps_hr,self.nChannels] )
         
         # Number of snapshots needed to fill the batch
-        nPatches = self.HR_boxsize // self.HR_patchsize
+        nPatches = self.hr_boxsize // self.hr_patchsize
         
         snap_ids = np.random.randint(0, self.nFiles, batch_size) # Here I can split train/test :)
 
-        # For each random snapshot, pick a random cube of size (LR/HR)_patchsize**3
+        # For each random snapshot, pick a random cube of size (lr/hr)_patchsize**3
         # If boxsize/patchsize is not integer, you won't fully exploit your snapshots
         # One batch will is filled with first by as many cubes as you can get from
         # a single snapshot. It would be nice to fill batches with independant patches.
@@ -125,11 +125,11 @@ class DataLoader():
             # Select the patch position in the snapshot
             bIDX, bIDY, bIDZ = np.random.randint(0, nPatches, 3)
             
-            LR_file = self.LR_fList[snap_id]
-            HR_file = self.HR_fList[snap_id]
+            lr_file = self.lr_fList[snap_id]
+            hr_file = self.hr_fList[snap_id]
 
             # Deal with Low-res data
-            with h5.File(LR_file, 'r') as f:
+            with h5.File(lr_file, 'r') as f:
                 gas = f['gas']
                 info = f['info']
                 dims = info.attrs['dims']
@@ -143,10 +143,10 @@ class DataLoader():
                         patch = np.log(patch)
 
                     # Data normalization... to be explored
-                    LR_train[bNum,:,:,:,cNum] = normalize(patch)
+                    lr_train[bNum,:,:,:,cNum] = normalize(patch)
 
             # Deal with High-res data. Similar
-            with h5.File(HR_file, 'r') as f:
+            with h5.File(hr_file, 'r') as f:
                 gas = f['gas']
                 info = f['info']
                 dims = info.attrs['dims']
@@ -157,19 +157,19 @@ class DataLoader():
                                   bIDZ*ps_hr:(bIDZ+1)*ps_hr]
                     if channel in ['density', 'pressure']:
                         patch = np.log(patch)
-                    HR_train[bNum,:,:,:,cNum] = normalize(patch)
+                    hr_train[bNum,:,:,:,cNum] = normalize(patch)
 
-        return LR_train, HR_train
+        return lr_train, hr_train
         
     def loadRandomBatch_noise(self, batch_size):
         """
         For testing only: put some random numbers in the batch
         """
-        ps_lr = self.HR_patchsize // self.sr_factor
-        ps_hr = self.HR_patchsize
-        LR_train = np.zeros([batch_size,ps_lr,ps_lr,ps_lr,self.nChannels] )
-        HR_train = np.zeros([batch_size,ps_hr,ps_hr,ps_hr,self.nChannels] )
-        nPatches = self.HR_boxsize // self.HR_patchsize
+        ps_lr = self.hr_patchsize // self.sr_factor
+        ps_hr = self.hr_patchsize
+        lr_train = np.zeros([batch_size,ps_lr,ps_lr,ps_lr,self.nChannels] )
+        hr_train = np.zeros([batch_size,ps_hr,ps_hr,ps_hr,self.nChannels] )
+        nPatches = self.hr_boxsize // self.hr_patchsize
         x_ = np.linspace(-1., 1., ps_lr)
         x_lr, y_lr, z_lr = np.meshgrid(x_, x_, x_)
         x_ = np.linspace(-1., 1., ps_hr)
@@ -177,8 +177,8 @@ class DataLoader():
         for bNum in range(batch_size):
             for cNum, channel in enumerate(self.channels):
                 patch = np.random.rand(ps_lr,ps_lr,ps_lr) * np.cos(2*np.pi*(x_lr**2 + y_lr**2 + z_lr**2)) * 10
-                LR_train[bNum,:,:,:,cNum] = normalize(patch)
+                lr_train[bNum,:,:,:,cNum] = normalize(patch)
             for cNum, channel in enumerate(self.channels):
                 patch = np.random.rand(ps_hr,ps_hr,ps_hr) * np.cos(2*np.pi*(x_hr**2 + y_hr**2 + z_hr**2)) + 10
-                HR_train[bNum,:,:,:,cNum] = normalize(patch)
-        return LR_train, HR_train
+                hr_train[bNum,:,:,:,cNum] = normalize(patch)
+        return lr_train, hr_train

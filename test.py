@@ -24,10 +24,10 @@ hr_dir = '/home/cluster/hlasco/scratch/ramses3d/pbox_n50_noGrav/post_processing/
 print('Initializing Networks', flush=True)
 
 gan = PISRT_GAN(
-        LR_directory=lr_dir,
-        HR_directory=hr_dir,
-        LR_patchsize=16,
-        HR_patchsize=64,
+        lr_directory=lr_dir,
+        hr_directory=hr_dir,
+        lr_patchsize=16,
+        hr_patchsize=64,
         output_dir = './rundir',
         lRate_G = 1e-4,
         lRate_D = 1e-7,
