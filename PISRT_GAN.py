@@ -19,7 +19,7 @@ import callbacks as cb
 
 class PISRT_GAN():
     """
-    Implementation of PIESRGAN as described in the paper
+    Implementation of a Physics-Informed Super Resolution GAN for Turbulent Flows
     """
 
     def __init__(self,
