@@ -48,38 +48,38 @@ class PISRT_GAN():
 
         # Low-resolution image dimensions
         self.lr_patchsize = lr_patchsize
-        
+
         # High-resolution image dimensions
         self.hr_patchsize = hr_patchsize
-        
+
         self.nChannels = nChannels
-    
+
         # Low-resolution and high-resolution shapes
         """ DNS-Data only has one channel, when only using PS field, when using u,v,w,ps, change to 4 channels """
         self.shape_lr = (self.lr_patchsize, self.lr_patchsize, self.lr_patchsize, self.nChannels)
         self.shape_hr = (self.hr_patchsize, self.hr_patchsize, self.hr_patchsize, self.nChannels)
-    
+
         # Learning rates
         self.lRate_G = lRate_G
         self.lRate_D = lRate_D
-        
+
         self.sr_factor = sr_factor
-        
+
         # Scaling of losses
         self.loss_weights = loss_weights
-        
+
         self.output_dir = output_dir
-    
+
         # Gan setup settings
         self.gan_loss = 'mse'
         self.dis_loss = 'binary_crossentropy'
-        
+
         # Build & compile the generator network
         self.generator = self.build_generator()
         self.compile_generator(self.generator)
 
         #self.refer_model = refer_model
-        
+
         # If training, build rest of GAN network
         if training_mode:
             self.discriminator = self.build_discriminator()
@@ -93,7 +93,7 @@ class PISRT_GAN():
         """Save the generator and discriminator networks"""
         self.generator.save_weights("{}generator_{}X_epoch{}.h5".format(filepath, self.upscaling_factor, e))
         self.discriminator.save_weights("{}discriminator_{}X_epoch{}.h5".format(filepath, self.upscaling_factor, e))
-        
+
 
     def load_weights(self, generator_weights=None, discriminator_weights=None, **kwargs):
         if generator_weights:
@@ -121,19 +121,19 @@ class PISRT_GAN():
             x1 = Conv3D(64, data_format="channels_last", kernel_size=3, strides=1, padding='same')(input)
             x1 = LeakyReLU(0.2)(x1)
             x1 = Concatenate()([input, x1])
-    
+
             x2 = Conv3D(64, data_format="channels_last", kernel_size=3, strides=1, padding='same')(x1)
             x2 = LeakyReLU(0.2)(x2)
             x2 = Concatenate()([input, x1, x2])
-    
+
             x3 = Conv3D(64, data_format="channels_last", kernel_size=3, strides=1, padding='same')(x2)
             x3 = LeakyReLU(0.2)(x3)
             x3 = Concatenate()([input, x1, x2, x3])
-    
+
             x4 = Conv3D(64, data_format="channels_last", kernel_size=3, strides=1, padding='same')(x3)
             x4 = LeakyReLU(0.2)(x4)
             x4 = Concatenate()([input, x1, x2, x3, x4])  #added x3, which ESRGAN didn't include
-    
+
             x5 = Conv3D(64, data_format="channels_last", kernel_size=3, strides=1, padding='same')(x4)
             x5 = Lambda(lambda x: x * 0.2)(x5)
             """here: assumed beta=0.2"""
@@ -148,7 +148,7 @@ class PISRT_GAN():
             x = Lambda(lambda x: x * 0.2)(x)
             out = Add()([x, input])
             return out
-            
+
 
         """----------------Assembly the generator-----------------"""
         # Input low resolution image
@@ -165,16 +165,16 @@ class PISRT_GAN():
         x = Conv3D(64,data_format="channels_last", kernel_size=3, strides=1, padding='same')(x)
         x = Lambda(lambda x: x * 0.2)(x)
         x = Add()([x, x_start])
-        
+
         # Upsampling layer
         x = upSamplingLayer(x,2, 'shuffle1')
         x = upSamplingLayer(x,2, 'shuffle2')
-        
-        hr_output = Conv3D(self.nChannels,data_format="channels_last", kernel_size=9, strides=1, padding='same')(x)
+
+        hr_output = Conv3D(self.nChannels,data_format="channels_last", kernel_size=3, strides=1, padding='same')(x)
         model = Model(inputs=lr_input, outputs=hr_output, name='Generator')
         #model.summary()
         return model
-        
+
     def content_loss(self, y_true,y_pred):
         """Compute the content loss: w_pixel * MSE(pixels) + w_grad * MSE(gradients)"""
         ret =  self.loss_weights['grad'] * losses.grad(y_true, y_pred)
@@ -188,7 +188,7 @@ class PISRT_GAN():
             optimizer=Adam(self.lRate_G, 0.9,0.999),
             metrics=[losses.PSNR, losses.pixel, losses.grad]
         )
-    
+
     def build_discriminator(self):
         """
         Build the discriminator network according to description in the paper.
@@ -207,7 +207,7 @@ class PISRT_GAN():
         # Input high resolution image
         hr_patch = self.hr_patchsize
         img = Input(shape=self.shape_hr)
-        
+
         x = discriminator_block(img,   hr_patch, 3, strides=2, batchNormalization=False)
         x = discriminator_block(x,   2*hr_patch, 3, strides=1, batchNormalization=True)
         x = discriminator_block(x,   2*hr_patch, 3, strides=2, batchNormalization=True)
@@ -225,7 +225,7 @@ class PISRT_GAN():
         # Create model and compile
         model = Model(inputs=img, outputs=x, name='Discriminator')
         return model
-        
+
     def build_ResAD(self):
         """
         Build a Residual Attention discriminator network. Not finished yet.
@@ -258,7 +258,7 @@ class PISRT_GAN():
         model.compile(optimizer=Adam(self.lRate_D), loss=losses.ResAttention)
 
         return model
-        
+
     def compile_discriminator(self, model):
         """Compile the discriminator with appropriate optimizer"""
         model.compile(
@@ -273,7 +273,7 @@ class PISRT_GAN():
             img_hr, generated_hr = x
             # Compute the Perceptual loss based on GRADIENT-field MSE
             grad_loss = losses.grad(img_hr, generated_hr)
-            
+
             # Compute the RaGAN loss
             fake_logit, real_logit = self.ResAD([img_hr, generated_hr])
             gen_loss = losses.ResAttention(None, [fake_logit, real_logit])
@@ -299,7 +299,7 @@ class PISRT_GAN():
         pixel_loss = Lambda(lambda x: self.loss_weights['pixel'] * x, name='pixel_loss')(total_loss[2])
         loss       = Lambda(lambda x: self.loss_weights['grad']*x[0] + self.loss_weights['adversatial']*x[1] +
                                       self.loss_weights['pixel']*x[2], name='total_loss')(total_loss)
-        
+
         # Create model
         model = Model(inputs=[img_lr, img_hr], outputs=[grad_loss, gen_loss, pixel_loss], name='GAN')
         model.add_loss(loss)
@@ -322,16 +322,16 @@ class PISRT_GAN():
 
         self.gen_savepath = self.output_dir + '/DNS_generator.h5'
         self.log_path = self.output_dir + '/logs'
-        
+
         if not os.path.exists(self.log_path):
              os.makedirs(self.log_path)
 
         callbacks = []
-        
+
         # This callback simply writes the metrics in a summary
         logs = cb.GeneratorLogs(self.generator, self.log_path)
         callbacks.append(logs)
-        
+
         ckpt = ModelCheckpoint(
             self.output_dir + '/SR-RRDB-G_4X.h5',
             verbose=1,
@@ -348,15 +348,15 @@ class PISRT_GAN():
         csv_logger.set_model(self.generator)
         csv_logger.on_train_begin()
         callbacks.append(csv_logger)
-        
+
         # Grab a snapshot for the image callback
         dl = ops.DataLoader(
             self.lr_directory,
             self.hr_directory,
         )
-            
-        lr_image, hr_image = dl.loadRandomBatch_noise(batch_size=1)
-        
+
+        lr_image, hr_image = dl.loadRandomBatch(batch_size=1)
+
         # For each epoch, this callback will plot a slice of Low-res/Super-res/High-res channels
         cbImg = cb.ImgCallback(
             logpath   = self.log_path,
@@ -365,20 +365,20 @@ class PISRT_GAN():
             hr_data   = hr_image[0:1,:,:,:,:]
         )
         callbacks.append(cbImg)
-        
+
         # The progress bar needs to know the metrics
         metrics_names = self.generator.metrics_names
-        
+
         # Need to handle restart epoch... I think I will just read the csv file
         for epoch in range(n_epochs):
-            lr_images, hr_images = dl.loadRandomBatch_noise(batch_size=batch_size*step_per_epoch)
+            lr_images, hr_images = dl.loadRandomBatch(batch_size=batch_size*step_per_epoch)
             print("\nEpoch {}/{}".format(epoch+1,n_epochs))
             pb_i = Progbar(step_per_epoch, stateful_metrics=metrics_names, verbose=2)
             for step in range(step_per_epoch):
                 lr = lr_images[step*batch_size:(step+1)*batch_size,:,:,:,:]
                 hr = hr_images[step*batch_size:(step+1)*batch_size,:,:,:,:]
                 logs = self.generator.train_on_batch(lr, hr)
-                
+
                 pb_val = [('loss', logs[0]),
                           ('PSNR', logs[1]),
                           ('pixel_loss', logs[2]),
