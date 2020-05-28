@@ -324,7 +324,7 @@ class PISRT_GAN():
         self.log_path = self.output_dir + '/logs'
 
         if not os.path.exists(self.log_path):
-             os.makedirs(self.log_path,parents=True)
+             os.makedirs(self.log_path)
 
         callbacks = []
 
