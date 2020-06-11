@@ -1,5 +1,8 @@
 import tensorflow as tf
+import numpy as np
 from tensorflow.keras import backend as K
+
+GAMMA = 5./3
 
 def pixel(y_true, y_pred):
     """
@@ -32,6 +35,44 @@ def grad(y_true,y_pred):
 
     return grad_loss
 
+def total_energy(y_true, y_pred):
+    """
+    Computes the Mean Square Error on the total energy
+    """
+    te_hr = get_total_energy(y_true)
+    te_sr = get_total_energy(y_pred)
+
+    diff = K.mean(K.square(te_hr-te_sr))
+    norm = K.mean(K.square(te_hr))
+
+    return diff/norm
+
+def mass_flux(y_true, y_pred):
+    """
+    Computes the Mean Square Error on the total energy
+    """
+    mf_hr = get_mass_flux(y_true)
+    mf_sr = get_mass_flux(y_pred)
+
+    diff = K.mean(K.square(mf_hr-mf_sr))
+    norm = K.mean(K.square(mf_hr))
+
+    return diff/norm
+
+def enstrophy(y_true, y_pred):
+    """
+    Computes the Mean Square Error on the enstrophy
+    """
+    ens_hr = get_enstrophy(y_true)
+    ens_sr = get_enstrophy(y_pred)
+
+    diff = K.mean(K.square(ens_hr-ens_sr))
+    norm = K.mean(K.square(ens_hr))
+
+    return diff/norm
+
+
+
 def PSNR(y_true, y_pred):
     """
     Peek Signal to Noise Ratio
@@ -39,8 +80,6 @@ def PSNR(y_true, y_pred):
     Since input is scaled from -1 to 1, MAX_I = 1, and thus 20 * log10(1) = 0. Only the last part of the equation istherefore neccesary.
     """
     return -10.0 * K.log(K.mean(K.square(y_pred - y_true))) / K.log(10.0)
-    
-    
     
 def ResAttention(y_true, y_pred):
     fake_logit = y_pred[0]
@@ -50,62 +89,70 @@ def ResAttention(y_true, y_pred):
     return ret
 
 
-
+def npGrad(inpt, dx, axis):
+    return np.gradient(inpt, dx, axis=axis)
     
     
-def grad_x(input):
-    out = []
-    nChannels = input.shape[-1]
-    for i in range(nChannels):
-        out.append(ddx(input,i))
-    ret = tf.stack(out, axis=-1)
+def grad_x(inpt):
+    dx = 1.0/inpt.shape[1]
+    ret = tf.numpy_function(npGrad, [inpt, dx,1], tf.float32)
     return ret
 
-def grad_y(input):
-    out = []
-    nChannels = input.shape[-1]
-    for i in range(nChannels):
-        out.append(ddy(input,i))
-    ret = tf.stack(out, axis=-1)
+def grad_y(inpt):
+    dx = 1.0/inpt.shape[1]
+    ret = tf.numpy_function(npGrad, [inpt, dx,2], tf.float32)
     return ret
 
-def grad_z(input):
-    out = []
-    nChannels = input.shape[-1]
-    for i in range(nChannels):
-        out.append(ddz(input,i))
-    ret = tf.stack(out, axis=-1)
+def grad_z(inpt):
+    dx = 1.0/inpt.shape[1]
+    ret = tf.numpy_function(npGrad, [inpt, dx,3], tf.float32)
     return ret
 
-def ddx(inpt, channel):
-    inpt_shape = inpt.get_shape().as_list()
-    var = tf.expand_dims( inpt[:,:,:,:,channel], axis=4 )
+def get_velocity_grad(inpt):
+    dudx = grad_x(inpt[:,:,:,:,0])
+    dudy = grad_y(inpt[:,:,:,:,0])
+    dudz = grad_z(inpt[:,:,:,:,0])
 
-    ddx1D = tf.constant([-1./60., 3./20., -3./4., 0., 3./4., -3./20., 1./60.], dtype=tf.float32)
-    ddx3D = tf.reshape(ddx1D, shape=(-1,1,1,1,1))
+    dvdx = grad_x(inpt[:,:,:,:,1])
+    dvdy = grad_y(inpt[:,:,:,:,1])
+    dvdz = grad_z(inpt[:,:,:,:,1])
 
-    strides = [1,1,1,1,1]
-    output = tf.nn.conv3d(var, ddx3D, strides, padding = 'VALID', data_format = 'NDHWC', name=None)
-    return output
+    dwdx = grad_x(inpt[:,:,:,:,2])
+    dwdy = grad_y(inpt[:,:,:,:,2])
+    dwdz = grad_z(inpt[:,:,:,:,2])
 
-def ddy(inpt, channel):
-    inpt_shape = inpt.get_shape().as_list()
-    var = tf.expand_dims( inpt[:,:,:,:,channel], axis=4 )
+    return dudx, dvdx, dwdx, dudy, dvdy, dwdy, dudz, dvdz, dwdz
 
-    ddx1D = tf.constant([-1./60., 3./20., -3./4., 0., 3./4., -3./20., 1./60.], dtype=tf.float32)
-    ddx3D = tf.reshape(ddx1D, shape=(1,-1,1,1,1))
+def get_vorticity(vel_grad):
+    dudx, dvdx, dwdx, dudy, dvdy, dwdy, dudz, dvdz, dwdz = vel_grad
+    vort_x = dwdy - dvdz
+    vort_y = dudz - dwdx
+    vort_z = dvdx - dudy
+    return vort_x, vort_y, vort_z
 
-    strides = [1,1,1,1,1]
-    output = tf.nn.conv3d(var, ddx3D, strides, padding = 'VALID', data_format = 'NDHWC', name=None)
-    return output
+def get_enstrophy(inpt):
+    vel_grad = get_velocity_grad(inpt)
+    vorticity = get_vorticity(vel_grad)
 
-def ddz(inpt, channel):
-    inpt_shape = inpt.get_shape().as_list()
-    var = tf.expand_dims( inpt[:,:,:,:,channel], axis=4 )
+    omega_x, omega_y, omega_z = vorticity
 
-    ddx1D = tf.constant([-1./60., 3./20., -3./4., 0., 3./4., -3./20., 1./60.], dtype=tf.float32)
-    ddx3D = tf.reshape(ddx1D, shape=(1,1,-1,1,1))
+    Omega = omega_x**2 + omega_y**2 + omega_z**2
 
-    strides = [1,1,1,1,1]
-    output = tf.nn.conv3d(var, ddx3D, strides, padding = 'VALID', data_format = 'NDHWC', name=None)
-    return output
+    return Omega
+
+def get_total_energy(inpt):
+    rho = inpt[:,:,:,:,3]
+    P   = inpt[:,:,:,:,4]
+    u2  = inpt[:,:,:,:,0]**2 + inpt[:,:,:,:,1]**2 + inpt[:,:,:,:,2]**2
+    ret = P / (GAMMA-1) + rho*u2
+    return ret
+
+def get_mass_flux(inpt):
+    rho = inpt[:,:,:,:,3]
+    u = inpt[:,:,:,:,0]
+    v = inpt[:,:,:,:,1]
+    w = inpt[:,:,:,:,2]
+
+    ret = grad_x(rho*u) + grad_y(rho*v) + grad_z(rho*w)
+
+    return ret

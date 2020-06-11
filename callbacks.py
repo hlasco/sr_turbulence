@@ -21,16 +21,22 @@ class GeneratorLogs(Callback):
     def on_epoch_end(self, epoch, logs={}):
         logger1 = tf.summary.create_file_writer(self.logpath + '/scalar/loss')
         logger2 = tf.summary.create_file_writer(self.logpath + '/scalar/pixel_loss')
-        logger3 = tf.summary.create_file_writer(self.logpath + '/scalar/grad_loss')
-        logger4 = tf.summary.create_file_writer(self.logpath + '/scalar/PSNR')
+        logger3 = tf.summary.create_file_writer(self.logpath + '/scalar/energy_loss')
+        logger4 = tf.summary.create_file_writer(self.logpath + '/scalar/flux_loss')
+        logger5 = tf.summary.create_file_writer(self.logpath + '/scalar/enstrophy_loss')
+        logger6 = tf.summary.create_file_writer(self.logpath + '/scalar/PSNR')
         with logger1.as_default():
             tf.summary.scalar(name='Generator Loss', data=logs['loss'], step=epoch)
         with logger2.as_default():
             tf.summary.scalar(name='Generator Loss', data=logs['pixel'], step=epoch)
         with logger3.as_default():
-            tf.summary.scalar(name='Generator Loss', data=logs['grad'], step=epoch)
+            tf.summary.scalar(name='Generator Loss', data=logs['total_energy'], step=epoch)
         with logger4.as_default():
-            tf.summary.scalar(name='Generator PSNR', data=logs['PSNR'], step=epoch)
+            tf.summary.scalar(name='Generator Loss', data=logs['mass_flux'], step=epoch)
+        with logger5.as_default():
+            tf.summary.scalar(name='Generator Loss', data=logs['enstrophy'], step=epoch)
+        with logger6.as_default():
+            tf.summary.scalar(name='PSNR', data=logs['PSNR'], step=epoch)
         return
     
     

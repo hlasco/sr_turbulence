@@ -28,11 +28,13 @@ gan = PISRT_GAN(
         hr_directory=hr_dir,
         lr_patchsize=16,
         hr_patchsize=64,
-        output_dir = './rundir',
+        output_dir = '/home/cluster/hlasco/scratch/gan/generator',
         lRate_G = 1e-4,
         lRate_D = 1e-7,
         nChannels=5,
+        bNorm=False,
         training_mode=True
     )
-
-gan.train_generator(batch_size=2, step_per_epoch=4, n_epochs=100)
+print('Training Generator', flush=True)
+#gan.restart('/home/cluster/hlasco/scratch/gan/generator_new/SR-RRDB-G_4X.h5', 4880)
+gan.train_generator(batch_size=1, step_per_epoch=4, n_epochs=4000)

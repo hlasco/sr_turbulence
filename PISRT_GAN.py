@@ -8,7 +8,7 @@ from tensorflow.keras.utils import Progbar
 from tensorflow.keras.models import load_model, Sequential, Model
 from tensorflow.keras.layers import Input, Activation, Add, Concatenate, Flatten, Dropout
 from tensorflow.keras.layers import BatchNormalization, LeakyReLU, PReLU, Conv3D, Dense
-from tensorflow.keras.layers import Lambda
+from tensorflow.keras.layers import Lambda, UpSampling3D
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.activations import sigmoid
 from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint, CSVLogger
@@ -29,7 +29,8 @@ class PISRT_GAN():
              batch_size=4,
              lRate_G=1e-4, lRate_D=1e-7,
              sr_factor=4,
-             loss_weights={'grad':.5,'adversatial':5e-5, 'pixel':.5},
+             bNorm = False,
+             loss_weights={'pixel':.7, 'TE':.1,'MF':.1,'ENS':0.1,'adversarial':5e-5, },
              output_dir='',
              training_mode=True,
              refer_model=None,
@@ -73,12 +74,17 @@ class PISRT_GAN():
         # Gan setup settings
         self.gan_loss = 'mse'
         self.dis_loss = 'binary_crossentropy'
+        
+        self.bNorm = bNorm
 
         # Build & compile the generator network
         self.generator = self.build_generator()
         self.compile_generator(self.generator)
 
         #self.refer_model = refer_model
+
+        self.epoch_G0 = 0
+        self.epoch_D0 = 0
 
         # If training, build rest of GAN network
         if training_mode:
@@ -88,6 +94,9 @@ class PISRT_GAN():
             #self.compile_discriminator(self.ResAD)
             #self.compile_gan(self.GAN)
 
+    def restart(self, generator_weights, epoch_G0):
+        self.epoch_G0 = epoch_G0
+        self.generator.load_weights(generator_weights)
 
     def save_weights(self, filepath, e=None):
         """Save the generator and discriminator networks"""
@@ -102,7 +111,7 @@ class PISRT_GAN():
             self.discriminator.load_weights(discriminator_weights, **kwargs)
 
 
-    def build_generator(self, ):
+    def build_generator(self):
         """
         Build the generator network.
         """
@@ -111,39 +120,64 @@ class PISRT_GAN():
         lr_patchsize = self.lr_patchsize
         self.data_format='channels_last'
 
-        def upSamplingLayer(input, scale, name):
-            x = Conv3D(256,data_format="channels_last", kernel_size=3, strides=1, padding='same')(input)
+        def upSamplingLayer_shuffle(input, scale, name):
+            x = Conv3D(256, data_format="channels_last", kernel_size=3, strides=1, padding='same')(input)
             x = ops.PixelShuffling(tf.shape(x), name=name, scale=2)(x)
             x = PReLU(alpha_initializer='zeros')(x)
             return x
 
-        def denseBlock(input):
+        def residualBlock(inpt):
+            x = Conv3D(64, data_format="channels_last", kernel_size=3, strides=1, padding='same')(inpt)
+            x = LeakyReLU(0.2)(x)
+            ret = Add()([x, inpt])
+            return ret
+
+        def resBlocks(inpt, num_resblock):
+            x = inpt
+            for i in range(num_resblock):
+                x = residualBlock(x)
+
+            x = Conv3D(64, data_format="channels_last", kernel_size=3, strides=1, padding='same')(x)
+            ret = Add()([x, inpt])
+            return ret
+
+        def denseBlock(input, bNorm):
             x1 = Conv3D(64, data_format="channels_last", kernel_size=3, strides=1, padding='same')(input)
+            if bNorm:
+                x1 = BatchNormalization(momentum = 0.5)(x1)
             x1 = LeakyReLU(0.2)(x1)
             x1 = Concatenate()([input, x1])
 
             x2 = Conv3D(64, data_format="channels_last", kernel_size=3, strides=1, padding='same')(x1)
+            if bNorm:
+                x2 = BatchNormalization(momentum = 0.5)(x2)
             x2 = LeakyReLU(0.2)(x2)
             x2 = Concatenate()([input, x1, x2])
 
             x3 = Conv3D(64, data_format="channels_last", kernel_size=3, strides=1, padding='same')(x2)
+            if bNorm:
+                x3 = BatchNormalization(momentum = 0.5)(x3)
             x3 = LeakyReLU(0.2)(x3)
             x3 = Concatenate()([input, x1, x2, x3])
 
             x4 = Conv3D(64, data_format="channels_last", kernel_size=3, strides=1, padding='same')(x3)
+            if bNorm:
+                x4 = BatchNormalization(momentum = 0.5)(x4)
             x4 = LeakyReLU(0.2)(x4)
             x4 = Concatenate()([input, x1, x2, x3, x4])  #added x3, which ESRGAN didn't include
 
             x5 = Conv3D(64, data_format="channels_last", kernel_size=3, strides=1, padding='same')(x4)
+            if bNorm:
+                x5 = BatchNormalization(momentum = 0.5)(x5)
             x5 = Lambda(lambda x: x * 0.2)(x5)
             """here: assumed beta=0.2"""
             x = Add()([x5, input])
             return x
 
-        def RRDB(input):
-            x = denseBlock(input)
-            x = denseBlock(x)
-            x = denseBlock(x)
+        def RRDB(input, bNorm):
+            x = denseBlock(input,bNorm)
+            x = denseBlock(x,bNorm)
+            x = denseBlock(x,bNorm)
             """here: assumed beta=0.2 as well"""
             x = Lambda(lambda x: x * 0.2)(x)
             out = Add()([x, input])
@@ -152,33 +186,37 @@ class PISRT_GAN():
 
         """----------------Assembly the generator-----------------"""
         # Input low resolution image
-        #shape = (lr_patchsize, lr_patchsize, lr_patchsize, self.nChannels)
-        #lr_input = Input(shape=(lr_patchsize, lr_patchsize, lr_patchsize, self.nChannels))#, batch_size=self.batch_size)
         lr_input = Input(shape=self.shape_lr)
         # Pre-residual
         x_start = Conv3D(64, data_format="channels_last", kernel_size=9, strides=1, padding='same')(lr_input)
         x_start = LeakyReLU(0.2)(x_start)
 
         # Residual-in-Residual Dense Block
-        x = RRDB(x_start)
+        #x = RRDB(x_start, self.bNorm)
+        x = resBlocks(x_start, num_resblock=12)
         # Post-residual block
         x = Conv3D(64,data_format="channels_last", kernel_size=3, strides=1, padding='same')(x)
+        if self.bNorm:
+            x = BatchNormalization(momentum = 0.5)(x)
         x = Lambda(lambda x: x * 0.2)(x)
         x = Add()([x, x_start])
 
         # Upsampling layer
-        x = upSamplingLayer(x,2, 'shuffle1')
-        x = upSamplingLayer(x,2, 'shuffle2')
+        x = upSamplingLayer_shuffle(x, 2, 'shuffle1')
+        x = upSamplingLayer_shuffle(x, 2, 'shuffle2')
 
-        hr_output = Conv3D(self.nChannels,data_format="channels_last", kernel_size=3, strides=1, padding='same')(x)
+        hr_output = Conv3D(self.nChannels,data_format="channels_last", kernel_size=9, strides=1, padding='same')(x)
         model = Model(inputs=lr_input, outputs=hr_output, name='Generator')
-        #model.summary()
+        model.summary()
         return model
 
     def content_loss(self, y_true,y_pred):
         """Compute the content loss: w_pixel * MSE(pixels) + w_grad * MSE(gradients)"""
-        ret =  self.loss_weights['grad'] * losses.grad(y_true, y_pred)
-        ret += self.loss_weights['pixel'] * losses.pixel(y_true, y_pred)
+        ret = self.loss_weights['pixel'] * losses.pixel(y_true, y_pred)
+        ret += self.loss_weights['TE'] * losses.total_energy(y_true, y_pred)
+        ret += self.loss_weights['MF'] * losses.mass_flux(y_true, y_pred)
+        ret += self.loss_weights['ENS'] * losses.enstrophy(y_true, y_pred)        
+
         return ret
 
     def compile_generator(self, model):
@@ -186,7 +224,7 @@ class PISRT_GAN():
         model.compile(
             loss=self.content_loss,
             optimizer=Adam(self.lRate_G, 0.9,0.999),
-            metrics=[losses.PSNR, losses.pixel, losses.grad]
+            metrics=[losses.PSNR, losses.pixel, losses.total_energy, losses.mass_flux, losses.enstrophy]
         )
 
     def build_discriminator(self):
@@ -206,8 +244,8 @@ class PISRT_GAN():
 
         # Input high resolution image
         hr_patch = self.hr_patchsize
-        img = Input(shape=self.shape_hr)
 
+        img = Input(shape=self.shape_hr)
         x = discriminator_block(img,   hr_patch, 3, strides=2, batchNormalization=False)
         x = discriminator_block(x,   2*hr_patch, 3, strides=1, batchNormalization=True)
         x = discriminator_block(x,   2*hr_patch, 3, strides=2, batchNormalization=True)
@@ -280,7 +318,17 @@ class PISRT_GAN():
 
             # Compute the pixel_loss
             pixel_loss = losses.pixel(img_hr, generated_hr)
-            return [grad_loss, gen_loss, pixel_loss]
+
+            # Compute the total_energy_loss
+            energy_loss = losses.total_energy(img_hr, generated_hr)
+
+            # Compute the mass_flux_loss
+            flux_loss = losses.mass_flux(img_hr, generated_hr)
+
+            # Compute the enstrophy_loss
+            flux_loss = losses.enstrophy(img_hr, generated_hr)
+
+            return [gen_loss, pixel_loss, total_energy_loss, mass_flux_loss, enstrophy_loss]
 
         # Input lr images
         img_lr = Input(self.shape_lr)
@@ -294,18 +342,23 @@ class PISRT_GAN():
 
         # Output tensors to a Model must be the output of a `Layer`
         total_loss = Lambda(GAN_output, name='GAN_output')([img_hr, generated_hr])
-        grad_loss  = Lambda(lambda x: self.loss_weights['grad'] * x, name='grad_loss')(total_loss[0])
-        gen_loss   = Lambda(lambda x: self.loss_weights['adversatial'] * x, name='gen_loss')(total_loss[1])
-        pixel_loss = Lambda(lambda x: self.loss_weights['pixel'] * x, name='pixel_loss')(total_loss[2])
-        loss       = Lambda(lambda x: self.loss_weights['grad']*x[0] + self.loss_weights['adversatial']*x[1] +
-                                      self.loss_weights['pixel']*x[2], name='total_loss')(total_loss)
-
+        gen_loss   = Lambda(lambda x: self.loss_weights['adversatial'] * x, name='gen_loss')(total_loss[0])
+        pixel_loss   = Lambda(lambda x: self.loss_weights['pixel'] * x, name='pixel_loss')(total_loss[1])
+        energy_loss = Lambda(lambda x: self.loss_weights['TE'] * x, name='energy_loss')(total_loss[2])
+        flux_loss = Lambda(lambda x: self.loss_weights['MF'] * x, name='flux_loss')(total_loss[3])
+        enstrophy_loss = Lambda(lambda x: self.loss_weights['ENS'] * x, name='enstrophy_loss')(total_loss[4])
+        loss       = Lambda(lambda x: self.loss_weights['adversatial']*x[0] + self.loss_weights['pixel']*x[1] + 
+                                      self.loss_weights['TE']*x[2] + self.loss_weights['MF']*x[3] +
+                                      self.loss_weights['ENS']*x[4], name='total_loss')(total_loss)
+                            
         # Create model
-        model = Model(inputs=[img_lr, img_hr], outputs=[grad_loss, gen_loss, pixel_loss], name='GAN')
+        model = Model(inputs=[img_lr, img_hr], outputs=[gen_loss, energy_loss, flux_loss, enstrophy_loss], name='GAN')
         model.add_loss(loss)
         model.add_metric(gen_loss, name='gen_loss', aggregation='mean')
         model.add_metric(pixel_loss, name='pixel_loss', aggregation='mean')
-        model.add_metric(grad_loss, name='grad_loss', aggregation='mean')
+        model.add_metric(energy_loss, name='energy_loss', aggregation='mean')
+        model.add_metric(flux_loss, name='flux_loss', aggregation='mean')
+        model.add_metric(enstrophy_loss, name='enstrophy_loss', aggregation='mean')
         model.compile(optimizer=Adam(self.lRate_G))
 
         return model
@@ -370,7 +423,8 @@ class PISRT_GAN():
         metrics_names = self.generator.metrics_names
 
         # Need to handle restart epoch... I think I will just read the csv file
-        for epoch in range(n_epochs):
+        e0 = self.epoch_G0
+        for epoch in range(e0, n_epochs + e0):
             lr_images, hr_images = dl.loadRandomBatch(batch_size=batch_size*step_per_epoch)
             print("\nEpoch {}/{}".format(epoch+1,n_epochs))
             pb_i = Progbar(step_per_epoch, stateful_metrics=metrics_names, verbose=2)
@@ -382,7 +436,10 @@ class PISRT_GAN():
                 pb_val = [('loss', logs[0]),
                           ('PSNR', logs[1]),
                           ('pixel_loss', logs[2]),
-                          ('grad_loss', logs[3])]
+                          ('energy_loss', logs[3]),
+                          ('flux_loss', logs[4]),
+                          ('enstrophy_loss', logs[5]),
+                          ]
 
                 pb_i.add(1, values=pb_val)
 
