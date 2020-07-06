@@ -75,54 +75,37 @@ def PixelShuffling(input_shape, name, scale=2):
 
     return Lambda(subpixel, output_shape=subpixel_shape, name=name)
 
-def normalize(patch):
-    """
-    Normalize a patch of fluid quantities.
-    """
-    mu = np.mean(patch)
-    std = np.std(patch)
-    return (patch-mu)/std
-
 class DataLoader():
     """
     Tool for loading snapshots from a directory
     """
 
     def __init__(self,
-                 lr_directory,      # Directory containing the High-res snapshots
-                 hr_directory,      # Directory containing the High-res snapshots
+                 directory,         # Directory containing the snapshots
                  hr_boxsize=128,    # High-res full box size
                  sr_factor=4,       # Super-resolution factor
                  hr_patchsize=64,   # High-res patch size
-                 nChannels=5,       # Number of channels (u,v,w,rho,P)
+                 nChannels=4,       # Number of channels (u,v,w,log10rho)
                  ):
 
-        self.hr_directory = hr_directory
-        self.lr_directory = lr_directory
+        self.directory    = directory
         self.hr_boxsize   = hr_boxsize
         self.sr_factor    = sr_factor
         self.hr_patchsize = hr_patchsize
         self.nChannels    = nChannels
 
         # Just to read my hdf5 snapshots
-        self.channels = ['velocity_x','velocity_y','velocity_z','density','pressure']
+        self.channels = ['ux','uy','uz','rho']
 
         # Make sure that your file names can be sorted
-        self.hr_fList = sorted(glob.glob(hr_directory+'/*.h5'))[3:]
-        self.hr_nFile = len(self.hr_fList)
+        self.fList = glob.glob(directory+'*[0-9][0-9][0-9][0-9]*_*[0-9][0-9][0-9][0-9]*_*[0-9][0-9][0-9][0-9]*/processed_data/snapshot.h5')
+        self.nFiles = len(self.fList)
 
-        self.lr_fList = sorted(glob.glob(lr_directory+'/*.h5'))[3:]
-        self.nFiles = len(self.lr_fList)
 
     def loadRandomBatch(self, batch_size):
         """
         Load a batch of data for training.
         """
-
-        # High-res and Low-res files should go by pair
-        if self.nFiles is not len(self.hr_fList):
-            raise ValueError('hr and lr directories should contain the same number of snapshots \
-                              lr_nFile={}, hr_nFile={}'.format(self.nFiles, len(self.hr_fList)))
 
         ps_lr = self.hr_patchsize // self.sr_factor
         ps_hr = self.hr_patchsize
@@ -140,48 +123,39 @@ class DataLoader():
         # One batch will is filled with first by as many cubes as you can get from
         # a single snapshot. It would be nice to fill batches with independant patches.
 
-
         for bNum, snap_id in enumerate(snap_ids):
             # Select the patch position in the snapshot
             bIDX, bIDY, bIDZ = np.random.randint(0, nPatches, 3)
 
-            lr_file = self.lr_fList[snap_id]
-            hr_file = self.hr_fList[snap_id]
+            file = self.fList[snap_id]
 
-            # Deal with Low-res data
-            with h5.File(lr_file, 'r') as f:
-                gas = f['gas']
-                info = f['info']
-                dims = info.attrs['dims']
+            with h5.File(file, 'r') as f:
+                hr = f['HR']
+                lr = f['LR']
                 for cNum, channel in enumerate(self.channels):
-                    patch = np.array(gas[channel]).reshape(dims)
+                    patch_lr = np.array(lr[channel])
+                    patch_hr = np.array(hr[channel])
                     # Take log(P) and log(rho)
-                    if channel in ['density', 'pressure']:
-                        patch = np.log(patch)
+                    if channel == 'rho':
+                        patch_lr = np.log10(patch_lr)
+                        patch_hr = np.log10(patch_hr)
 
                     # Data normalization... to be explored
-                    patch = normalize(patch)
-                    patch = patch[bIDX*ps_lr:(bIDX+1)*ps_lr,
-                                  bIDY*ps_lr:(bIDY+1)*ps_lr,
-                                  bIDZ*ps_lr:(bIDZ+1)*ps_lr]
+                    mean = np.mean(patch_hr)
+                    std = np.std(patch_hr)
 
-                    lr_train[bNum,:,:,:,cNum] = patch
+                    patch_lr = (patch_lr-mean)/std
+                    patch_hr = (patch_hr-mean)/std
 
-            # Deal with High-res data. Similar
-            with h5.File(hr_file, 'r') as f:
-                gas = f['gas']
-                info = f['info']
-                dims = info.attrs['dims']
-                for cNum, channel in enumerate(self.channels):
-                    patch = np.array(gas[channel]).reshape(dims)
-                    if channel in ['density', 'pressure']:
-                        patch = np.log(patch)
-                    patch = normalize(patch)
-                    patch = patch[bIDX*ps_hr:(bIDX+1)*ps_hr,
-                                  bIDY*ps_hr:(bIDY+1)*ps_hr,
-                                  bIDZ*ps_hr:(bIDZ+1)*ps_hr]
+                    patch_lr = patch_lr[bIDX*ps_lr:(bIDX+1)*ps_lr,
+                                        bIDY*ps_lr:(bIDY+1)*ps_lr,
+                                        bIDZ*ps_lr:(bIDZ+1)*ps_lr]
+                    patch_hr = patch_hr[bIDX*ps_hr:(bIDX+1)*ps_hr,
+                                        bIDY*ps_hr:(bIDY+1)*ps_hr,
+                                        bIDZ*ps_hr:(bIDZ+1)*ps_hr]
 
-                    hr_train[bNum,:,:,:,cNum] = patch
+                    lr_train[bNum,:,:,:,cNum] = patch_lr
+                    hr_train[bNum,:,:,:,cNum] = patch_hr
 
         return lr_train, hr_train
 
@@ -198,7 +172,7 @@ class DataLoader():
         ps_lr = self.hr_patchsize // self.sr_factor
         ps_hr = self.hr_patchsize
 
-        # Number of patchss needed to fill the input box
+        # Number of patches needed to fill the input box
         batch_size = (self.hr_boxsize // self.hr_patchsize)**3
         size = self.hr_boxsize // self.hr_patchsize
         lr_train = np.zeros([batch_size,ps_lr,ps_lr,ps_lr,self.nChannels] )
@@ -212,43 +186,32 @@ class DataLoader():
             bIDY = (index // size) % size
             bIDZ = index % size
 
-            lr_file = self.lr_fList[snap_id]
-            hr_file = self.hr_fList[snap_id]
+            file = self.fList[snap_id]
 
-            # Deal with Low-res data
-            with h5.File(lr_file, 'r') as f:
-                gas = f['gas']
-                info = f['info']
-                dims = info.attrs['dims']
+            with h5.File(file, 'r') as f:
+                hr = f['HR']
+                lr = f['LR']
                 for cNum, channel in enumerate(self.channels):
-                    patch = np.array(gas[channel]).reshape(dims)
+                    patch_lr = np.array(lr[channel])
+                    patch_hr = np.array(hr[channel])
                     # Take log(P) and log(rho)
-                    if channel in ['density', 'pressure']:
-                        patch = np.log(patch)
-                    patch = normalize(patch)
-                    patch = patch[bIDX*ps_lr:(bIDX+1)*ps_lr,
-                                  bIDY*ps_lr:(bIDY+1)*ps_lr,
-                                  bIDZ*ps_lr:(bIDZ+1)*ps_lr]
-
+                    if channel == 'rho':
+                        patch_lr = np.log10(patch_lr)
+                        patch_hr = np.log10(patch_hr)
 
                     # Data normalization... to be explored
-                    lr_train[index,:,:,:,cNum] = patch
+                    patch_lr = normalize(patch_lr)
+                    patch_hr = normalize(patch_hr)
 
-            # Deal with High-res data. Similar
-            with h5.File(hr_file, 'r') as f:
-                gas = f['gas']
-                info = f['info']
-                dims = info.attrs['dims']
-                for cNum, channel in enumerate(self.channels):
-                    patch = np.array(gas[channel]).reshape(dims)
-                    if channel in ['density', 'pressure']:
-                        patch = np.log(patch)
-                    patch = normalize(patch)
-                    patch = patch[bIDX*ps_hr:(bIDX+1)*ps_hr,
-                                  bIDY*ps_hr:(bIDY+1)*ps_hr,
-                                  bIDZ*ps_hr:(bIDZ+1)*ps_hr]
+                    patch_lr = patch_lr[bIDX*ps_lr:(bIDX+1)*ps_lr,
+                                        bIDY*ps_lr:(bIDY+1)*ps_lr,
+                                        bIDZ*ps_lr:(bIDZ+1)*ps_lr]
+                    patch_hr = patch_hr[bIDX*ps_hr:(bIDX+1)*ps_hr,
+                                        bIDY*ps_hr:(bIDY+1)*ps_hr,
+                                        bIDZ*ps_hr:(bIDZ+1)*ps_hr]
 
-                    hr_train[index,:,:,:,cNum] = patch
+                    lr_train[bNum,:,:,:,cNum] = patch_lr
+                    hr_train[bNum,:,:,:,cNum] = patch_hr
 
         return lr_train, hr_train
 

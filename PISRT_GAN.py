@@ -12,6 +12,7 @@ from tensorflow.keras.layers import Lambda, UpSampling3D
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.activations import sigmoid
 from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint, CSVLogger
+from tensorflow.keras.losses import BinaryCrossentropy
 
 import ops
 import losses
@@ -23,9 +24,9 @@ class PISRT_GAN():
     """
 
     def __init__(self,
-             lr_directory, hr_directory,
+             data_directory,
              lr_patchsize=16, hr_patchsize=64,
-             nChannels=5,
+             nChannels=4,
              batch_size=4,
              lRate_G=1e-4, lRate_D=1e-7,
              sr_factor=4,
@@ -44,8 +45,7 @@ class PISRT_GAN():
         lRate_G: Learning rate of generator
         lRage_D: Learning rate of discriminator
         """
-        self.lr_directory = lr_directory
-        self.hr_directory = hr_directory
+        self.data_directory = data_directory
 
         # Low-resolution image dimensions
         self.lr_patchsize = lr_patchsize
@@ -64,35 +64,31 @@ class PISRT_GAN():
         self.lRate_G = lRate_G
         self.lRate_D = lRate_D
 
+        # Super-resolution factor
         self.sr_factor = sr_factor
 
         # Scaling of losses
         self.loss_weights = loss_weights
-
         self.output_dir = output_dir
-
-        # Gan setup settings
-        self.gan_loss = 'mse'
-        self.dis_loss = 'binary_crossentropy'
-        
         self.bNorm = bNorm
 
         # Build & compile the generator network
         self.generator = self.build_generator()
         self.compile_generator(self.generator)
 
-        #self.refer_model = refer_model
-
+        # Initial epochs
         self.epoch_G0 = 0
         self.epoch_D0 = 0
 
-        # If training, build rest of GAN network
+        # If training, build the entire GAN
         if training_mode:
             self.discriminator = self.build_discriminator()
-            #self.ResAD = self.build_ResAD()
-            #self.GAN = self.build_GAN()
-            #self.compile_discriminator(self.ResAD)
-            #self.compile_gan(self.GAN)
+            self.compile_discriminator(self.discriminator)
+
+            # Only the generator gets traine through the GAN network
+            self.discriminator.trainable = False
+            self.GAN = self.build_GAN()
+            print('Models compiled for training')
 
     def restart(self, generator_weights, epoch_G0):
         self.epoch_G0 = epoch_G0
@@ -188,11 +184,13 @@ class PISRT_GAN():
         # Input low resolution image
         lr_input = Input(shape=self.shape_lr)
         # Pre-residual
-        x_start = Conv3D(64, data_format="channels_last", kernel_size=9, strides=1, padding='same')(lr_input)
+        x_start = Conv3D(64, data_format="channels_last", kernel_size=3, strides=1, padding='same')(lr_input)
         x_start = LeakyReLU(0.2)(x_start)
 
         # Residual-in-Residual Dense Block
         #x = RRDB(x_start, self.bNorm)
+
+        # My custom residual blocks
         x = resBlocks(x_start, num_resblock=12)
         # Post-residual block
         x = Conv3D(64,data_format="channels_last", kernel_size=3, strides=1, padding='same')(x)
@@ -205,17 +203,17 @@ class PISRT_GAN():
         x = upSamplingLayer_shuffle(x, 2, 'shuffle1')
         x = upSamplingLayer_shuffle(x, 2, 'shuffle2')
 
-        hr_output = Conv3D(self.nChannels,data_format="channels_last", kernel_size=9, strides=1, padding='same')(x)
+        hr_output = Conv3D(self.nChannels,data_format="channels_last", kernel_size=3, strides=1, padding='same')(x)
         model = Model(inputs=lr_input, outputs=hr_output, name='Generator')
-        model.summary()
+
         return model
 
     def content_loss(self, y_true,y_pred):
-        """Compute the content loss: w_pixel * MSE(pixels) + w_grad * MSE(gradients)"""
+        """Compute the content loss"""
         ret = self.loss_weights['pixel'] * losses.pixel(y_true, y_pred)
         ret += self.loss_weights['TE'] * losses.total_energy(y_true, y_pred)
         ret += self.loss_weights['MF'] * losses.mass_flux(y_true, y_pred)
-        ret += self.loss_weights['ENS'] * losses.enstrophy(y_true, y_pred)        
+        ret += self.loss_weights['ENS'] * losses.enstrophy(y_true, y_pred)
 
         return ret
 
@@ -229,146 +227,215 @@ class PISRT_GAN():
 
     def build_discriminator(self):
         """
-        Build the discriminator network according to description in the paper.
-        :param optimizer: Keras optimizer to use for network
-        :param int filters: How many filters to use in first conv layer
-        :return: the compiled model
+        Build the discriminator network.
+        :return: model
         """
 
         def discriminator_block(input, filters, kernel_size, strides=1, batchNormalization=True):
-            x = Conv3D(filters, kernel_size=kernel_size, strides=strides, padding='same')(input)
-            x = LeakyReLU(alpha=0.2)(x)
+            d1 = Conv3D(filters, kernel_size=kernel_size, strides=strides, padding='same')(input)
+            d2 = LeakyReLU(alpha=0.2)(d1)
             if batchNormalization:
-                x = BatchNormalization(momentum=0.8)(x)
-            return x
+                d2 = BatchNormalization(momentum=0.8)(d2)
+            return d2
 
         # Input high resolution image
         hr_patch = self.hr_patchsize
 
-        img = Input(shape=self.shape_hr)
-        x = discriminator_block(img,   hr_patch, 3, strides=2, batchNormalization=False)
-        x = discriminator_block(x,   2*hr_patch, 3, strides=1, batchNormalization=True)
-        x = discriminator_block(x,   2*hr_patch, 3, strides=2, batchNormalization=True)
-        x = discriminator_block(x,   4*hr_patch, 3, strides=1, batchNormalization=True)
-        x = discriminator_block(x,   4*hr_patch, 3, strides=2, batchNormalization=True)
-        x = discriminator_block(x,   8*hr_patch, 3, strides=1, batchNormalization=True)
-        x = discriminator_block(x,   8*hr_patch, 3, strides=2, batchNormalization=True)
-        x = discriminator_block(x,  16*hr_patch, 3, strides=1, batchNormalization=True)
-        x = discriminator_block(x,  16*hr_patch, 3, strides=2, batchNormalization=True)
-        x = Flatten()(x)
+        x0 = Input(shape=self.shape_hr)
+        x = discriminator_block(x0,  1*hr_patch, 3, strides=1, batchNormalization=False)
+        x = discriminator_block(x,   1*hr_patch, 3, strides=2, batchNormalization=False)
+        x = discriminator_block(x,   2*hr_patch, 3, strides=1, batchNormalization=False)
+        x = discriminator_block(x,   2*hr_patch, 3, strides=2, batchNormalization=False)
+        x = discriminator_block(x,   4*hr_patch, 3, strides=1, batchNormalization=False)
+        x = discriminator_block(x,   4*hr_patch, 3, strides=2, batchNormalization=False)
+        x = discriminator_block(x,   8*hr_patch, 3, strides=1, batchNormalization=False)
+        x = discriminator_block(x,   8*hr_patch, 3, strides=2, batchNormalization=False)
+
         x = Dense(16*hr_patch)(x)
         x = LeakyReLU(alpha=0.2)(x)
         x = Dropout(0.4)(x)
-        x = Dense(1, activation='sigmoid')(x)
+        validity = Dense(1, activation='sigmoid')(x)
+
         # Create model and compile
-        model = Model(inputs=img, outputs=x, name='Discriminator')
-        return model
-
-    def build_ResAD(self):
-        """
-        Build a Residual Attention discriminator network. Not finished yet.
-        """
-        def interpolating(x):
-            u = K.random_uniform((K.shape(x[0])[0],) + (1,) * (K.ndim(x[0]) - 1))
-            return x[0] * u + x[1] * (1 - u)
-
-        def ResAD_output(x):
-            real, fake = x
-            fake_logit = (fake - K.mean(real))
-            real_logit = (real - K.mean(fake))
-            return [fake_logit, real_logit]
-
-        # Input hr images
-        hr_size = self.hr_patchsize
-        imgs_hr      = Input(shape=(hr_size, hr_size, hr_size, self.nChannels))
-        generated_hr = Input(shape=(hr_size, hr_size, hr_size, self.nChannels))
-
-        # Create a high resolution image from the low resolution one
-        real_discriminator_logits = self.discriminator(imgs_hr)
-        fake_discriminator_logits = self.discriminator(generated_hr)
-
-        total_loss = Lambda(ResAD_output, name='ResAD_output')([real_discriminator_logits, fake_discriminator_logits])
-        # Output tensors to a Model must be the output of a `Layer`
-        fake_logit = Lambda(lambda x: x, name='fake_logit')(total_loss[0])
-        real_logit = Lambda(lambda x: x, name='real_logit')(total_loss[1])
-
-        model = Model(inputs=[imgs_hr, generated_hr], outputs=[fake_logit, real_logit], name='ResAD')
-        model.compile(optimizer=Adam(self.lRate_D), loss=losses.ResAttention)
+        model = Model(inputs=x0, outputs=validity, name='Discriminator')
+        model.add_metric(validity, name='validity', aggregation='mean')
 
         return model
 
     def compile_discriminator(self, model):
-        """Compile the discriminator with appropriate optimizer"""
+        """Compile the discriminator with Adam optimizer"""
         model.compile(
-            loss=None,
+            loss='mse',
             optimizer=Adam(self.lRate_D, 0.9, 0.999),
-            metrics=['accuracy']
         )
 
     def build_GAN(self):
         """Create the combined PISRT_GAN network"""
         def GAN_output(x):
-            img_hr, generated_hr = x
-            # Compute the Perceptual loss based on GRADIENT-field MSE
-            grad_loss = losses.grad(img_hr, generated_hr)
-
-            # Compute the RaGAN loss
-            fake_logit, real_logit = self.ResAD([img_hr, generated_hr])
-            gen_loss = losses.ResAttention(None, [fake_logit, real_logit])
+            _img_hr, _img_sr, _gen = x
 
             # Compute the pixel_loss
-            pixel_loss = losses.pixel(img_hr, generated_hr)
+            pixel = losses.pixel(_img_hr, _img_sr)
 
             # Compute the total_energy_loss
-            energy_loss = losses.total_energy(img_hr, generated_hr)
+            total_energy = losses.total_energy(_img_hr, _img_sr)
 
             # Compute the mass_flux_loss
-            flux_loss = losses.mass_flux(img_hr, generated_hr)
+            mass_flux = losses.mass_flux(_img_hr, _img_sr)
 
             # Compute the enstrophy_loss
-            flux_loss = losses.enstrophy(img_hr, generated_hr)
+            enstrophy = losses.enstrophy(_img_hr, _img_sr)
 
-            return [gen_loss, pixel_loss, total_energy_loss, mass_flux_loss, enstrophy_loss]
+            # Compute the enstrophy_loss
+            PSNR = losses.PSNR(_img_hr, _img_sr)
+
+            return [PSNR, _gen,  pixel, total_energy, mass_flux, enstrophy]
 
         # Input lr images
         img_lr = Input(self.shape_lr)
         img_hr = Input(self.shape_hr)
 
-        # Create a high resolution snapshot
-        generated_hr = self.generator(img_lr)
-        # In the combined model we only train the generator through tne GAN
-        self.discriminator.trainable = False
-        self.ResAD.trainable = False
+        # Generate the super-resolution snapshots
+        img_sr = self.generator(img_lr)
+
+        gen = self.discriminator(img_sr)
 
         # Output tensors to a Model must be the output of a `Layer`
-        total_loss = Lambda(GAN_output, name='GAN_output')([img_hr, generated_hr])
-        gen_loss   = Lambda(lambda x: self.loss_weights['adversatial'] * x, name='gen_loss')(total_loss[0])
-        pixel_loss   = Lambda(lambda x: self.loss_weights['pixel'] * x, name='pixel_loss')(total_loss[1])
-        energy_loss = Lambda(lambda x: self.loss_weights['TE'] * x, name='energy_loss')(total_loss[2])
-        flux_loss = Lambda(lambda x: self.loss_weights['MF'] * x, name='flux_loss')(total_loss[3])
-        enstrophy_loss = Lambda(lambda x: self.loss_weights['ENS'] * x, name='enstrophy_loss')(total_loss[4])
-        loss       = Lambda(lambda x: self.loss_weights['adversatial']*x[0] + self.loss_weights['pixel']*x[1] + 
-                                      self.loss_weights['TE']*x[2] + self.loss_weights['MF']*x[3] +
-                                      self.loss_weights['ENS']*x[4], name='total_loss')(total_loss)
-                            
-        # Create model
-        model = Model(inputs=[img_lr, img_hr], outputs=[gen_loss, energy_loss, flux_loss, enstrophy_loss], name='GAN')
-        model.add_loss(loss)
-        model.add_metric(gen_loss, name='gen_loss', aggregation='mean')
-        model.add_metric(pixel_loss, name='pixel_loss', aggregation='mean')
-        model.add_metric(energy_loss, name='energy_loss', aggregation='mean')
-        model.add_metric(flux_loss, name='flux_loss', aggregation='mean')
-        model.add_metric(enstrophy_loss, name='enstrophy_loss', aggregation='mean')
-        model.compile(optimizer=Adam(self.lRate_G))
+        gan_output   = Lambda(GAN_output, name='GAN_output')([img_hr, img_sr, gen])
+        PSNR         = Lambda(lambda x: x, name='PSNR')(gan_output[0])
+        gen          = Lambda(lambda x: x, name='gen')(gan_output[1])
+        pixel        = Lambda(lambda x: x, name='pixel')(gan_output[2])
+        total_energy = Lambda(lambda x: x, name='total_energy')(gan_output[3])
+        mass_flux    = Lambda(lambda x: x, name='mass_flux')(gan_output[4])
+        enstrophy    = Lambda(lambda x: x, name='enstrophy')(gan_output[5])
 
+        loss   = Lambda(lambda x: self.loss_weights['adversarial']*x[1] + self.loss_weights['pixel']*x[2] +
+                                  self.loss_weights['TE']*x[3] + self.loss_weights['MF']*x[4] +
+                                  self.loss_weights['ENS']*x[5], name='total_loss')(gan_output)
+
+        # Create model
+        model = Model(inputs=[img_lr, img_hr], outputs=[PSNR, gen, pixel, total_energy, mass_flux, enstrophy], name='GAN')
+        model.add_loss(loss)
+
+        model.add_metric(PSNR, name='PSNR', aggregation='mean')
+        model.add_metric(gen, name='gen', aggregation='mean')
+        model.add_metric(pixel, name='pixel', aggregation='mean')
+        model.add_metric(total_energy, name='total_energy', aggregation='mean')
+        model.add_metric(mass_flux, name='mass_flux', aggregation='mean')
+        model.add_metric(enstrophy, name='enstrophy', aggregation='mean')
+        model.compile(optimizer=Adam(self.lRate_G, 0.9,0.999))
         return model
 
-    def compile_gan(self, model):
-        """Compile the GAN with appropriate optimizer"""
-        model.compile(
-            loss=None,
-            optimizer=Adam(self.lRate_G, 0.9, 0.999)
+    def train_GAN(self, batch_size=8, step_per_epoch=4, n_epochs=100):
+        """Trains the generator only"""
+
+        print('Using LR_D=', self.lRate_G, ' LR_D=', self.lRate_D)
+        self.log_path = self.output_dir + '/logs'
+
+        if not os.path.exists(self.log_path):
+             os.makedirs(self.log_path)
+
+        callbacks_G = []
+        callbacks_D = []
+
+        # This callback simply writes the metrics in a summary
+        logger_G = cb.GanLogs(self.GAN, self.log_path, modeltype='generator')
+        callbacks_G.append(logger_G)
+
+        # This callback simply writes the metrics in a summary
+        logger_D = cb.GanLogs(self.discriminator, self.log_path, modeltype='discriminator')
+        callbacks_D.append(logger_D)
+
+        ckpt_G = ModelCheckpoint(
+            self.output_dir + '/SR-RRDB-G_4X.h5',
+            verbose=1,
+            save_freq='epoch',
+            save_best_only=False,
+            save_weights_only=True
         )
+        ckpt_G.set_model(self.generator)
+        callbacks_G.append(ckpt_G)
+
+        ckpt_D = ModelCheckpoint(
+            self.output_dir + '/SR-RRDB-D_4X.h5',
+            verbose=1,
+            save_freq='epoch',
+            save_best_only=False,
+            save_weights_only=True
+        )
+        ckpt_D.set_model(self.discriminator)
+        callbacks_D.append(ckpt_D)
+
+        # Write the training metrics in a .csv file
+        csv_logger_G = CSVLogger(self.output_dir + '/history_generator.csv', append=True, separator='\t')
+        csv_logger_G.set_model(self.GAN)
+        csv_logger_G.on_train_begin()
+        callbacks_G.append(csv_logger_G)
+
+        # Write the training metrics in a .csv file
+        csv_logger_D = CSVLogger(self.output_dir + '/history_discriminator.csv', append=True, separator='\t')
+        csv_logger_D.set_model(self.discriminator)
+        csv_logger_D.on_train_begin()
+        callbacks_D.append(csv_logger_D)
+
+        # Grab a snapshot for the image callback
+        dl = ops.DataLoader(
+            self.data_directory,
+        )
+
+        lr_image, hr_image = dl.loadRandomBatch(batch_size=1)
+
+        # For each epoch, this callback will plot a slice of Low-res/Super-res/High-res channels
+        cbImg = cb.ImgCallback(
+            logpath   = self.log_path,
+            generator = self.generator,
+            lr_data   = lr_image[0:1,:,:,:,:],
+            hr_data   = hr_image[0:1,:,:,:,:]
+        )
+        callbacks_G.append(cbImg)
+
+        # The progress bar needs to know the metric names
+        metrics_names = ['loss_G','loss_D','PSNR','gen_loss','pixel_loss','energy_loss','flux_loss','enstrophy_loss']
+
+        # Need to handle restart epoch... I think I will just read the csv file
+        e0 = self.epoch_G0
+        for epoch in range(e0, n_epochs + e0):
+            lr_image, hr_image = dl.loadRandomBatch(batch_size=batch_size*step_per_epoch)
+            print("\nEpoch {}/{}".format(epoch+1,n_epochs))
+            pb_i = Progbar(step_per_epoch, stateful_metrics=metrics_names, verbose=2)
+            for step in range(step_per_epoch):
+                lr = lr_image[step*batch_size:(step+1)*batch_size,:,:,:,:]
+                hr = hr_image[step*batch_size:(step+1)*batch_size,:,:,:,:]
+                sr = self.generator.predict(lr)
+
+                labels_real = np.zeros(batch_size)
+                labels_fake = np.ones(batch_size)
+
+                logs_D_real = self.discriminator.train_on_batch(x=hr, y=labels_real)
+                logs_D_fake = self.discriminator.train_on_batch(x=sr, y=labels_fake)
+
+                loss_D = 0.5*np.add(logs_D_fake[0], logs_D_real[0])
+
+                logs_G = self.GAN.train_on_batch([lr, hr], None)
+
+                pb_val = [('loss_G',         logs_G[0]),
+                          ('loss_D',         loss_D),
+                          ('PSNR',           logs_G[1]),
+                          ('gen_loss',       logs_G[2]),
+                          ('pixel_loss',     logs_G[3]),
+                          ('energy_loss',    logs_G[4]),
+                          ('flux_loss',      logs_G[5]),
+                          ('enstrophy_loss', logs_G[6]),
+                          ]
+
+                pb_i.add(1, values=pb_val)
+
+            cb_logs_G = cb.named_logs(self.GAN, logs_G)
+            for callback in callbacks_G:
+               callback.on_epoch_end(epoch+1, cb_logs_G)
+            cb_logs_D = {'loss':loss_D, 'output_real':logs_D_real[1], 'output_fake':logs_D_fake[1]}
+            for callback in callbacks_D:
+               callback.on_epoch_end(epoch+1, cb_logs_D)
 
     def train_generator(self, batch_size=8, step_per_epoch=4, n_epochs=100):
         """Trains the generator only"""
@@ -404,8 +471,7 @@ class PISRT_GAN():
 
         # Grab a snapshot for the image callback
         dl = ops.DataLoader(
-            self.lr_directory,
-            self.hr_directory,
+            self.data_directory,
         )
 
         lr_image, hr_image = dl.loadRandomBatch(batch_size=1)

@@ -80,12 +80,21 @@ def PSNR(y_true, y_pred):
     Since input is scaled from -1 to 1, MAX_I = 1, and thus 20 * log10(1) = 0. Only the last part of the equation istherefore neccesary.
     """
     return -10.0 * K.log(K.mean(K.square(y_pred - y_true))) / K.log(10.0)
+
+def mse(y_true, y_pred):
+    #fake, real = y_pred
+    #ret = -y_true * K.log(y_pred) - (1-y_true)*K.log(1-y_pred)
+    return K.mean(K.square(y_pred - y_true))
     
 def ResAttention(y_true, y_pred):
-    fake_logit = y_pred[0]
-    real_logit = y_pred[1]
-    ret = K.mean(K.binary_crossentropy(K.zeros_like(fake_logit), fake_logit) +
-                 K.binary_crossentropy(K.ones_like(real_logit), real_logit))
+    target_fake = y_true[0]
+    target_real = y_true[1]
+
+    fake = y_pred[0]
+    real = y_pred[1]
+    #fake, real = y_pred
+    ret = K.mean(K.binary_crossentropy(target_real, real) +
+                 K.binary_crossentropy(target_fake, fake))
     return ret
 
 
@@ -141,14 +150,13 @@ def get_enstrophy(inpt):
     return Omega
 
 def get_total_energy(inpt):
-    rho = inpt[:,:,:,:,3]
-    P   = inpt[:,:,:,:,4]
+    rho = 10**inpt[:,:,:,:,3]
     u2  = inpt[:,:,:,:,0]**2 + inpt[:,:,:,:,1]**2 + inpt[:,:,:,:,2]**2
-    ret = P / (GAMMA-1) + rho*u2
+    ret = .5*rho*u2
     return ret
 
 def get_mass_flux(inpt):
-    rho = inpt[:,:,:,:,3]
+    rho = 10**inpt[:,:,:,:,3]
     u = inpt[:,:,:,:,0]
     v = inpt[:,:,:,:,1]
     w = inpt[:,:,:,:,2]

@@ -11,7 +11,47 @@ def named_logs(model, logs):
     for l in zip(model.metrics_names, logs):
       result[l[0]] = l[1]
     return result
-    
+
+class GanLogs(Callback):
+    def __init__(self, model, logpath, modeltype='generator'):
+        self.logpath = logpath
+        self.model = model
+        self.modeltype = modeltype
+    def on_epoch_end(self, epoch, logs={}):
+        if self.modeltype=='generator':
+            logger1 = tf.summary.create_file_writer(self.logpath + '/scalar/loss_G')
+            logger2 = tf.summary.create_file_writer(self.logpath + '/scalar/adversarial')
+            logger3 = tf.summary.create_file_writer(self.logpath + '/scalar/pixel_loss')
+            logger4 = tf.summary.create_file_writer(self.logpath + '/scalar/energy_loss')
+            logger5 = tf.summary.create_file_writer(self.logpath + '/scalar/flux_loss')
+            logger6 = tf.summary.create_file_writer(self.logpath + '/scalar/enstrophy_loss')
+            logger7 = tf.summary.create_file_writer(self.logpath + '/scalar/PSNR')
+            with logger1.as_default():
+                tf.summary.scalar(name='Generator Loss', data=logs['loss'], step=epoch)
+            with logger2.as_default():
+                tf.summary.scalar(name='Generator Loss', data=logs['gen'], step=epoch)
+            with logger3.as_default():
+                tf.summary.scalar(name='Generator Loss', data=logs['pixel'], step=epoch)
+            with logger4.as_default():
+                tf.summary.scalar(name='Generator Loss', data=logs['total_energy'], step=epoch)
+            with logger5.as_default():
+                tf.summary.scalar(name='Generator Loss', data=logs['mass_flux'], step=epoch)
+            with logger6.as_default():
+                tf.summary.scalar(name='Generator Loss', data=logs['enstrophy'], step=epoch)
+            with logger7.as_default():
+                tf.summary.scalar(name='PSNR', data=logs['PSNR'], step=epoch)
+
+            return
+        elif self.modeltype=='discriminator':
+            logger1 = tf.summary.create_file_writer(self.logpath + '/scalar/loss_D')
+            logger2 = tf.summary.create_file_writer(self.logpath + '/scalar/output_real')
+            logger3 = tf.summary.create_file_writer(self.logpath + '/scalar/output_fake')
+            with logger1.as_default():
+                tf.summary.scalar(name='Discriminator Loss', data=logs['loss'], step=epoch)
+            with logger2.as_default():
+                tf.summary.scalar(name='Discriminator Output', data=logs['output_real'], step=epoch)
+            with logger3.as_default():
+                tf.summary.scalar(name='Discriminator Output', data=logs['output_fake'], step=epoch)
     
 class GeneratorLogs(Callback):
     def __init__(self, model, logpath):

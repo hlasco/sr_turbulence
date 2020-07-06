@@ -18,23 +18,21 @@ tf.autograph.set_verbosity(3)
 #    tf.config.experimental.set_visible_devices(gpus[hvd.local_rank()], 'GPU')
 
 
-lr_dir = '/home/cluster/hlasco/scratch/ramses3d/pbox_n50_noGrav/post_processing/covering_grids_5/'
-hr_dir = '/home/cluster/hlasco/scratch/ramses3d/pbox_n50_noGrav/post_processing/covering_grids_7/'
+data_dir = '/home/cluster/hlasco/scratch/boxicgen/'
 
 print('Initializing Networks', flush=True)
 
 gan = PISRT_GAN(
-        lr_directory=lr_dir,
-        hr_directory=hr_dir,
+        data_directory=data_dir,
         lr_patchsize=16,
         hr_patchsize=64,
         output_dir = '/home/cluster/hlasco/scratch/gan/generator',
         lRate_G = 1e-4,
         lRate_D = 1e-7,
-        nChannels=5,
+        nChannels=4,
         bNorm=False,
         training_mode=True
     )
 print('Training Generator', flush=True)
 #gan.restart('/home/cluster/hlasco/scratch/gan/generator_new/SR-RRDB-G_4X.h5', 4880)
-gan.train_generator(batch_size=1, step_per_epoch=4, n_epochs=4000)
+gan.train_generator(batch_size=8, step_per_epoch=8, n_epochs=1000)
