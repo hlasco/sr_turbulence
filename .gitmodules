@@ -1,3 +1,6 @@
 [submodule "dataBuilder/music"]
 	path = dataBuilder/music
 	url = https://bitbucket.org/ohahn/music/src/master/
+[submodule "dataBuilder/ramses"]
+	path = dataBuilder/ramses
+	url = https://bitbucket.org/rteyssie/ramses/src/master/
