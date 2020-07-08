@@ -1,7 +1,8 @@
 __pycache__
 *.o
-*/simulation
 
-*degrade_grafic
-*/amr2grafic
+dataBuilder/ramses_tools/simulation
+dataBuilder/boxicgen/degrade_grafic
+dataBuilder/boxicgen/amr2grafic
+
 *.so
