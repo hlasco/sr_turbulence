@@ -2,6 +2,6 @@ __pycache__
 *.o
 */simulation
 
-*/degrade_grafic
+*degrade_grafic
 */amr2grafic
 *.so
