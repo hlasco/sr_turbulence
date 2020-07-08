@@ -1,3 +1,7 @@
-rundir/*
-*.xcode*
 __pycache__
+*.o
+*/simulation
+
+*/degrade_grafic
+*/amr2grafic
+*.so
