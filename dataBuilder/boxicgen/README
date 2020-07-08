@@ -1,0 +1,21 @@
+This 'package' generated initial conditions for turbulent box simulations in the context of
+star formation.
+
+Author: Tine Colman (tcolman@physik.uzh.ch)
+        Partially based on previous work by Andreas Blueler and Elena Gavagnin
+
+To set up the package:
+  1) Install MUSIC
+  2) Add the simple_turb transfer function to the MUSIC plugins folder
+  3) compile the grafic library with 
+         f2py -c -m gro graficout.f90
+  4) compile the fortran codes 'amr2grafic.f90' and 'degrade_grafic.f90'
+     ifort amr2grafic.f90 -o amr2grafic
+
+To generate ICs:
+  1) Adapt the parameters in generate_hydro_ic.sh and run the script
+  2) Run a hydro-only simulation with the generated ICs
+  3) Find the output from where you want to start the gravity run
+     (Ekin/2 to have fully developed turbulence)
+  4) Adapt the parameters in generate_grav_ic.sh and run the script
+  5) You now have turbulent box ICs.
