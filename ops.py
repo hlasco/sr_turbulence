@@ -82,7 +82,7 @@ class DataLoader():
 
     def __init__(self,
                  directory,         # Directory containing the snapshots
-                 hr_boxsize=128,    # High-res full box size
+                 hr_boxsize=256,    # High-res full box size
                  sr_factor=4,       # Super-resolution factor
                  hr_patchsize=64,   # High-res patch size
                  nChannels=4,       # Number of channels (u,v,w,log10rho)
@@ -121,7 +121,7 @@ class DataLoader():
         # For each random snapshot, pick a random cube of size (lr/hr)_patchsize**3
         # If boxsize/patchsize is not integer, you won't fully exploit your snapshots
         # One batch will is filled with first by as many cubes as you can get from
-        # a single snapshot. It would be nice to fill batches with independant patches.
+        # a single snapshot. It could be better to fill batches with data from different snapshots.
 
         for bNum, snap_id in enumerate(snap_ids):
             # Select the patch position in the snapshot
@@ -161,32 +161,19 @@ class DataLoader():
 
     def loadSnapshot(self, idx):
         """
-        Load a batch of data for training.
+        Load a full box from a snapshot.
         """
 
-        # High-res and Low-res files should go by pair
-        if self.nFiles is not len(self.hr_fList):
-            raise ValueError('hr and lr directories should contain the same number of snapshots \
-                              lr_nFile={}, hr_nFile={}'.format(self.nFiles, len(self.hr_fList)))
-
-        ps_lr = self.hr_patchsize // self.sr_factor
-        ps_hr = self.hr_patchsize
-
         # Number of patches needed to fill the input box
-        batch_size = (self.hr_boxsize // self.hr_patchsize)**3
-        size = self.hr_boxsize // self.hr_patchsize
-        lr_train = np.zeros([batch_size,ps_lr,ps_lr,ps_lr,self.nChannels] )
-        hr_train = np.zeros([batch_size,ps_hr,ps_hr,ps_hr,self.nChannels] )
-        snap_id = idx
+        batch_size = 1
+        hr_size = self.hr_boxsize
+        lr_size = self.hr_boxsize // self.sr_factor
 
-        for index in range(batch_size):
-            # Select the patch position in the snapshot
+        lr_train = np.zeros([batch_size,lr_size,lr_size,lr_size,self.nChannels] )
+        hr_train = np.zeros([batch_size,hr_size,hr_size,hr_size,self.nChannels] )
 
-            bIDX = index // (size * size)
-            bIDY = (index // size) % size
-            bIDZ = index % size
-
-            file = self.fList[snap_id]
+        for bNum in range(batch_size):
+            file = self.fList[idx]
 
             with h5.File(file, 'r') as f:
                 hr = f['HR']
@@ -200,15 +187,11 @@ class DataLoader():
                         patch_hr = np.log10(patch_hr)
 
                     # Data normalization... to be explored
-                    patch_lr = normalize(patch_lr)
-                    patch_hr = normalize(patch_hr)
+                    mean = np.mean(patch_hr)
+                    std = np.std(patch_hr)
 
-                    patch_lr = patch_lr[bIDX*ps_lr:(bIDX+1)*ps_lr,
-                                        bIDY*ps_lr:(bIDY+1)*ps_lr,
-                                        bIDZ*ps_lr:(bIDZ+1)*ps_lr]
-                    patch_hr = patch_hr[bIDX*ps_hr:(bIDX+1)*ps_hr,
-                                        bIDY*ps_hr:(bIDY+1)*ps_hr,
-                                        bIDZ*ps_hr:(bIDZ+1)*ps_hr]
+                    patch_lr = (patch_lr-mean)/std
+                    patch_hr = (patch_hr-mean)/std
 
                     lr_train[bNum,:,:,:,cNum] = patch_lr
                     hr_train[bNum,:,:,:,cNum] = patch_hr

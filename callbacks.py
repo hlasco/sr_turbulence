@@ -29,7 +29,7 @@ class GanLogs(Callback):
             with logger1.as_default():
                 tf.summary.scalar(name='Generator Loss', data=logs['loss'], step=epoch)
             with logger2.as_default():
-                tf.summary.scalar(name='Generator Loss', data=logs['gen'], step=epoch)
+                tf.summary.scalar(name='Generator Loss', data=logs['adversarial'], step=epoch)
             with logger3.as_default():
                 tf.summary.scalar(name='Generator Loss', data=logs['pixel'], step=epoch)
             with logger4.as_default():
