@@ -4,7 +4,7 @@
 
 The upsampling model is based on a GAN with a similar architecture as models used for super-resolution of 2D images.
 
-The generator is a convolutional neural network with redidual blocks and upsampling layers based on nearest neighbor interpolation. The discriminator has a convolutional architecture, follows by fully connected layers for binary classification.
+The generator is a convolutional neural network with redidual blocks and upsampling layers based on nearest neighbor interpolation. The discriminator has a convolutional architecture, followed by fully connected layers for binary classification.
 
 The adversarial loss of the generator is enhanced with a content loss which is designed to capture relevant physical differences between true high-resolution turbulence and super-resolved fields.
 
