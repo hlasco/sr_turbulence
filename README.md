@@ -1,4 +1,4 @@
-# Physics-Informed Super-Resolution for ISM Turbulence
+# Super-Resolution of ISM turbulence
 
 ## Model
 
