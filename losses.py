@@ -150,13 +150,13 @@ def get_enstrophy(inpt):
     return Omega
 
 def get_total_energy(inpt):
-    rho = 10**inpt[:,:,:,:,3]
+    rho = inpt[:,:,:,:,3]
     u2  = inpt[:,:,:,:,0]**2 + inpt[:,:,:,:,1]**2 + inpt[:,:,:,:,2]**2
     ret = .5*rho*u2
     return ret
 
 def get_mass_flux(inpt):
-    rho = 10**inpt[:,:,:,:,3]
+    rho = inpt[:,:,:,:,3]
     u = inpt[:,:,:,:,0]
     v = inpt[:,:,:,:,1]
     w = inpt[:,:,:,:,2]

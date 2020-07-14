@@ -18,7 +18,7 @@ import ops
 import losses
 import callbacks as cb
 
-class PISRT_GAN():
+class SRISMt():
     """
     Implementation of a Physics-Informed Super Resolution GAN for Turbulent Flows
     """
@@ -55,8 +55,16 @@ class PISRT_GAN():
 
         self.nChannels = nChannels
 
-        self.strategy = tf.distribute.MirroredStrategy()
-        print('Num GPUs Available: {}'.format(self.strategy.num_replicas_in_sync), flush=True)
+        nGPUs = len(tf.config.experimental.list_physical_devices('GPU'))
+        print("Num GPUs Available: ", nGPUs, flush=True)
+
+
+        self.strategy = tf.distribute.get_strategy()
+        if nGPUs>1:
+            print("Using MirroredStrategy", flush=True)
+            self.strategy = tf.distribute.MirroredStrategy()
+            #print("Using CentralStorageStrategy", flush=True)
+            #self.strategy =tf.distribute.experimental.CentralStorageStrategy()
 
         # Low-resolution and high-resolution shapes
         """ DNS-Data only has one channel, when only using PS field, when using u,v,w,ps, change to 4 channels """
@@ -77,7 +85,7 @@ class PISRT_GAN():
 
         # Build & compile the generator network
         self.generator = self.build_generator()
-        #self.compile_generator(self.generator)
+        self.compile_generator(self.generator)
 
         # Initial epochs
         self.epoch_0 = 0
@@ -116,7 +124,6 @@ class PISRT_GAN():
             x = UpSampling3D(size=scale, data_format="channels_last")(input)
             x = Conv3D(256, data_format="channels_last", kernel_size=3, strides=1, padding='same')(x)
             x = Activation('relu')(x)
-            #x = ReLU()(x)
             return x
 
         def RDB(inpt):
@@ -164,6 +171,7 @@ class PISRT_GAN():
             # Final layer : recombine the channels together
             hr_output = Conv3D(self.nChannels,data_format="channels_last", kernel_size=3, strides=1, padding='same')(x)
             model = Model(inputs=lr_input, outputs=hr_output, name='Generator')
+            model.summary()
         return model
 
     def content_loss(self, y_true,y_pred):
@@ -198,7 +206,8 @@ class PISRT_GAN():
             return d2
 
         # Input high resolution image
-        hr_patch = self.hr_patchsize
+        hr_patch = self.hr_patchsize//2
+        lr_patch = self.lr_patchsize
         with self.strategy.scope():
             x0 = Input(shape=self.shape_hr)
             
@@ -234,7 +243,7 @@ class PISRT_GAN():
             )
 
     def build_GAN(self):
-        """Create the combined PISRT_GAN network"""
+        """Create the combined SRISMt network"""
         def GAN_output(x):
             _img_hr, _img_sr, _adversarial = x
 
@@ -266,8 +275,8 @@ class PISRT_GAN():
             # Generate the super-resolution snapshots
             img_sr = self.generator(img_lr)
     
-            adversarial = self.discriminator(img_sr)
-    
+            pred_D = self.discriminator(img_sr)
+            adversarial = K.mean(K.binary_crossentropy(target=tf.ones_like(pred_D), output=pred_D))
             # Output tensors to a Model must be the output of a `Layer`
             # That's a bit messy, I should be able to pack this up in a cleaner way
             gan_output   = Lambda(GAN_output, name='GAN_output')([img_hr, img_sr, adversarial])
@@ -323,7 +332,7 @@ class PISRT_GAN():
             verbose=1,
             save_freq='epoch',
             save_best_only=False,
-            save_weights_only=True
+            save_weights_only=False
         )
         ckpt_G.set_model(self.generator)
         callbacks_G.append(ckpt_G)
@@ -334,7 +343,7 @@ class PISRT_GAN():
             verbose=1,
             save_freq='epoch',
             save_best_only=False,
-            save_weights_only=True
+            save_weights_only=False
         )
         ckpt_D.set_model(self.discriminator)
         callbacks_D.append(ckpt_D)
@@ -373,30 +382,51 @@ class PISRT_GAN():
         # Need to handle restart epoch... Atm it's a parameter declared when restarting a model
         e0 = self.epoch_0
         for epoch in range(e0, n_epochs + e0):
+            lrs, hrs = dl.loadRandomBatch(batch_size=batch_size*step_per_epoch)
             print("\nEpoch {}/{}".format(epoch+1,n_epochs), flush=True)
             for step in range(step_per_epoch):
 
-                # Load a batch at each step, less memory consuming, probably slow
-                lr, hr = dl.loadRandomBatch(batch_size=batch_size)
+                lr = lrs[batch_size*step:batch_size*(step+1),:,:,:,:]
+                hr = hrs[batch_size*step:batch_size*(step+1),:,:,:,:]
+
                 sr = self.generator.predict(lr)
 
                 # Here I could try to add some noise to improve the Discriminator
-                labels_real = np.zeros(batch_size)
-                labels_fake = np.ones(batch_size)
-
+                labels_real = np.ones(batch_size)
+                labels_fake = np.zeros(batch_size)
                 # Two training steps for the Discriminator
                 logs_D_real = self.discriminator.train_on_batch(x=hr, y=labels_real)
                 logs_D_fake = self.discriminator.train_on_batch(x=sr, y=labels_fake)
-
                 # For callbacks
                 loss_D = 0.5*np.add(logs_D_fake[0], logs_D_real[0])
 
                 # Training step for the Generator
                 logs_G = self.GAN.train_on_batch([lr, hr], None)
+                logs_G = cb.named_logs(self.GAN, logs_G)
 
-                print("\t Step {}/{}: loss_G={:10.4f}, loss_D={:10.4f}".format(step+1,step_per_epoch, logs_G[0], loss_D), flush=True)
+                print("  Step {}/{}: loss_G={:10.4f}, loss_D={:10.4f}".format(
+                      step+1,step_per_epoch, logs_G['loss'], loss_D), flush=True)
 
-            cb_logs_G = cb.named_logs(self.GAN, logs_G)
+
+                dis_count = 1
+                while (loss_D > 0.6) and (dis_count < 2):
+                    logs_D_real = self.discriminator.train_on_batch(x=hr, y=labels_real)
+                    logs_D_fake = self.discriminator.train_on_batch(x=sr, y=labels_fake)
+                    loss_D = 0.5*np.add(logs_D_fake[0], logs_D_real[0])
+                    print("    D substep {}, loss={:10.4f}".format(dis_count, loss_D), flush=True)
+                    dis_count += 1
+
+                adv_loss = logs_G['adversarial']
+                gen_count = 1
+                while (adv_loss > 0.6) and (gen_count < 2):
+                    logs_G = self.GAN.train_on_batch([lr, hr], None)
+                    logs_G = cb.named_logs(self.GAN, logs_G)
+                    adv_loss = logs_G['adversarial']
+                    loss = logs_G['loss']
+                    print("    G substep {}, loss={:10.4f}, adv_loss={:10.4f}".format(gen_count, loss, adv_loss), flush=True)
+                    gen_count += 1
+
+            cb_logs_G = logs_G
             for callback in callbacks_G:
                callback.on_epoch_end(epoch+1, cb_logs_G)
             cb_logs_D = {'loss':loss_D, 'output_real':logs_D_real[1], 'output_fake':logs_D_fake[1]}
@@ -419,12 +449,11 @@ class PISRT_GAN():
         callbacks.append(logs)
 
         ckpt = ModelCheckpoint(
-            self.output_dir + '/SR-RRDB-G_4X.h5',
+            self.output_dir + '/SR-RRDB-D_4X.h5',
             verbose=1,
-            monitor='PSNR',
-            mode='max',
-            save_best_only=True,
-            save_weights_only=True
+            save_freq='epoch',
+            save_best_only=False,
+            save_weights_only=False
         )
         ckpt.set_model(self.generator)
         callbacks.append(ckpt)
@@ -464,17 +493,9 @@ class PISRT_GAN():
                 lr = lr_images[step*batch_size:(step+1)*batch_size,:,:,:,:]
                 hr = hr_images[step*batch_size:(step+1)*batch_size,:,:,:,:]
                 logs = self.generator.train_on_batch(lr, hr)
+                logs = cb.named_logs(self.generator, logs)
+                print("  Step {}/{}: loss_G={:10.4f}".format(
+                      step+1,step_per_epoch, logs['loss']), flush=True)
 
-                pb_val = [('loss', logs[0]),
-                          ('PSNR', logs[1]),
-                          ('pixel_loss', logs[2]),
-                          ('energy_loss', logs[3]),
-                          ('flux_loss', logs[4]),
-                          ('enstrophy_loss', logs[5]),
-                          ]
-
-                pb_i.add(1, values=pb_val)
-
-            cb_logs = cb.named_logs(self.generator, logs)
             for callback in callbacks:
-                callback.on_epoch_end(epoch+1, cb_logs)
+                callback.on_epoch_end(epoch+1, logs)

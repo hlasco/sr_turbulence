@@ -4,6 +4,12 @@ SCRIPTPATH="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
 cd $SCRIPTPATH
 
+echo "Building Ramses"
+cd ramses/bin && make -f $SCRIPTPATH/ramses_tools/Makefile.ramses3d
+cp ramses3d $SCRIPTPATH/simulation
+
+cd $SCRIPTPATH
+
 echo "Adding Burger's turbulence transfer function to MUSIC plugins"
 cp boxicgen/transfer_simpleturb.cc music/src/plugins/
 

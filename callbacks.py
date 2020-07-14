@@ -86,7 +86,7 @@ def imageGenerator(lr, sr, hr):
     titles=[r'$u$',r'$v$',r'$w$',r'$\log \rho$',r'$\log P$']
     cmaps = [plt.cm.RdBu, plt.cm.RdBu, plt.cm.RdBu, plt.cm.viridis,plt.cm.viridis]
     ax[0,0].set_ylabel('Filtered')
-    ax[1,0].set_ylabel('PISRT_GAN')
+    ax[1,0].set_ylabel('SRISMt')
     ax[2,0].set_ylabel('Unfiltered')
     for i in range(nC):
         vmin = np.min(hr[:,:,i])
