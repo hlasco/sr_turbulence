@@ -29,3 +29,7 @@ python3, tensorflow>2.0, h5py, numpy
 
 ### Density slice
 ![alt text](fig/zoom_rho_gan.png)
+
+### Energy and Density spectra
+
+![alt text](fig/spectrum.png)
