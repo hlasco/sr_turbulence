@@ -59,7 +59,7 @@ export OMP_NUM_THREADS=1
 mpirun simulation namelist.nml > ramses_logs.txt
 
 cd ..
-python postProcess.py $RUNDIR > $RUNDIR/postProcess_logs.txt
+python $SCRIPTPATH/postProcess.py $RUNDIR > $RUNDIR/postProcess_logs.txt
 
 rm -rf $RUNDIR/output_00001
 rm -rf $RUNDIR/output_00002
