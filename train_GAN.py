@@ -19,7 +19,8 @@ tf.autograph.set_verbosity(3)
 
 
 data_dir = '/home/cluster/hlasco/scratch/boxicgen/'
-run_dir = '/home/cluster/hlasco/scratch/gan/train4/'
+run_dir = '/home/cluster/hlasco/scratch/gan/train/'
+pretrained_G = '/home/cluster/hlasco/scratch/generator/SR-RRDB-G_4X.h5'
 
 print('Initializing Networks', flush=True)
 
@@ -30,11 +31,14 @@ gan = SRISMt(
         output_dir = run_dir,
         lRate_G = 1e-4,
         lRate_D = 1e-4,
-        loss_weights={'pixel':1.0, 'TE':1.0,'MF':1.0,'ENS':1.0,'adversarial':0.1, },
+        loss_weights={'pixel':1.0, 'TE':1.0,'MF':1.0,'ENS':1.0,'adversarial':0.005, },
         nChannels=4,
         bNorm=False,
         training_mode=True
     )
 print('Training GAN', flush=True)
-#gan.restart(gen_w=run_dir + 'SR-RRDB-G_4X.h5', dis_w=run_dir + 'SR-RRDB-D_4X.h5', epoch_0=1000)
+#gan.restart(gen_w=pretrained_G, epoch_0=0)
+gan.GAN.summary()
+gan.generator.summary()
+gan.discriminator.summary()
 gan.train_GAN(batch_size=1, step_per_epoch=4, n_epochs=10000)

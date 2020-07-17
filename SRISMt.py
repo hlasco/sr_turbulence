@@ -18,6 +18,9 @@ import ops
 import losses
 import callbacks as cb
 
+
+EPS = 1e-7
+
 class SRISMt():
     """
     Implementation of a Physics-Informed Super Resolution GAN for Turbulent Flows
@@ -93,17 +96,20 @@ class SRISMt():
         # If training, build and compile the combined model
         if training_mode:
             self.discriminator = self.build_discriminator()
-            self.GAN = self.build_GAN() #Build and compile happens here
             self.compile_discriminator(self.discriminator)
+            self.discriminator.trainable = False
+            self.GAN = self.build_GAN() #Build and compile happens here
+            #self.discriminator.trainable = True
+
 
     def restart(self, gen_w=None, dis_w=None, epoch_0=0):
         self.epoch_0 = epoch_0
         if gen_w is not None:
             print('Restarting generator from weights: ', gen_w)
-            self.generator.load_weights(gen_w)
+            self.generator = tf.keras.models.load_model(gen_w, compile=False)
         if dis_w is not None:
             print('Restarting discriminator from weights: ', dis_w)
-            self.discriminator.load_weights(dis_w)
+            self.discriminator = tf.keras.models.load_model(dis_w, compile=False)
 
     def build_generator(self):
         """
@@ -171,7 +177,6 @@ class SRISMt():
             # Final layer : recombine the channels together
             hr_output = Conv3D(self.nChannels,data_format="channels_last", kernel_size=3, strides=1, padding='same')(x)
             model = Model(inputs=lr_input, outputs=hr_output, name='Generator')
-            model.summary()
         return model
 
     def content_loss(self, y_true,y_pred):
@@ -230,13 +235,11 @@ class SRISMt():
             # Create model and compile
             model = Model(inputs=x0, outputs=validity, name='Discriminator')
             model.add_metric(validity, name='validity', aggregation='mean')
-            model.summary()
         return model
 
     def compile_discriminator(self, model):
         """Compile the discriminator with Adam optimizer"""
         with self.strategy.scope():
-            model.trainable = True
             model.compile(
                 loss='binary_crossentropy',
                 optimizer=Adam(self.lRate_D, 0.9, 0.999),
@@ -266,8 +269,6 @@ class SRISMt():
 
         # Input lr images
         with self.strategy.scope():
-            self.discriminator.trainable = False
-
             # Size of images have to be well defined here for the discriminator
             img_lr = Input(self.shape_lr)
             img_hr = Input(self.shape_hr)
@@ -276,7 +277,8 @@ class SRISMt():
             img_sr = self.generator(img_lr)
     
             pred_D = self.discriminator(img_sr)
-            adversarial = K.mean(K.binary_crossentropy(target=tf.ones_like(pred_D), output=pred_D))
+            adversarial = K.mean(-K.log(pred_D + EPS))
+            #adversarial = K.mean(K.binary_crossentropy(target=tf.ones_like(pred_D), output=pred_D))
             # Output tensors to a Model must be the output of a `Layer`
             # That's a bit messy, I should be able to pack this up in a cleaner way
             gan_output   = Lambda(GAN_output, name='GAN_output')([img_hr, img_sr, adversarial])
@@ -392,8 +394,8 @@ class SRISMt():
                 sr = self.generator.predict(lr)
 
                 # Here I could try to add some noise to improve the Discriminator
-                labels_real = np.ones(batch_size)
-                labels_fake = np.zeros(batch_size)
+                labels_real = np.ones(batch_size)  - np.random.uniform(low=0.0, high=0.2, size=batch_size)
+                labels_fake = np.zeros(batch_size) + np.random.uniform(low=0.0, high=0.2, size=batch_size)
                 # Two training steps for the Discriminator
                 logs_D_real = self.discriminator.train_on_batch(x=hr, y=labels_real)
                 logs_D_fake = self.discriminator.train_on_batch(x=sr, y=labels_fake)
@@ -407,9 +409,9 @@ class SRISMt():
                 print("  Step {}/{}: loss_G={:10.4f}, loss_D={:10.4f}".format(
                       step+1,step_per_epoch, logs_G['loss'], loss_D), flush=True)
 
-
+                """
                 dis_count = 1
-                while (loss_D > 0.6) and (dis_count < 2):
+                while (loss_D > 0.6) and (dis_count < 0):
                     logs_D_real = self.discriminator.train_on_batch(x=hr, y=labels_real)
                     logs_D_fake = self.discriminator.train_on_batch(x=sr, y=labels_fake)
                     loss_D = 0.5*np.add(logs_D_fake[0], logs_D_real[0])
@@ -418,20 +420,22 @@ class SRISMt():
 
                 adv_loss = logs_G['adversarial']
                 gen_count = 1
-                while (adv_loss > 0.6) and (gen_count < 2):
+                while (adv_loss > 0.6) and (gen_count < 0):
                     logs_G = self.GAN.train_on_batch([lr, hr], None)
                     logs_G = cb.named_logs(self.GAN, logs_G)
                     adv_loss = logs_G['adversarial']
                     loss = logs_G['loss']
                     print("    G substep {}, loss={:10.4f}, adv_loss={:10.4f}".format(gen_count, loss, adv_loss), flush=True)
                     gen_count += 1
+                """
 
-            cb_logs_G = logs_G
-            for callback in callbacks_G:
-               callback.on_epoch_end(epoch+1, cb_logs_G)
-            cb_logs_D = {'loss':loss_D, 'output_real':logs_D_real[1], 'output_fake':logs_D_fake[1]}
-            for callback in callbacks_D:
-               callback.on_epoch_end(epoch+1, cb_logs_D)
+            if(epoch%10==0):
+                cb_logs_G = logs_G
+                for callback in callbacks_G:
+                    callback.on_epoch_end(epoch+1, cb_logs_G)
+                cb_logs_D = {'loss':loss_D, 'output_real':logs_D_real[1], 'output_fake':logs_D_fake[1]}
+                for callback in callbacks_D:
+                    callback.on_epoch_end(epoch+1, cb_logs_D)
 
     def train_generator(self, batch_size=8, step_per_epoch=4, n_epochs=100):
         """Trains the generator only"""
