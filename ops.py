@@ -81,7 +81,7 @@ class DataLoader():
     """
 
     def __init__(self,
-                 directory,         # Directory containing the snapshots
+                 directory,         # Directory containing training and validation data
                  hr_boxsize=256,    # High-res full box size
                  sr_factor=4,       # Super-resolution factor
                  hr_patchsize=64,   # High-res patch size
@@ -98,14 +98,25 @@ class DataLoader():
         self.channels = ['ux','uy','uz','rho']
 
         # Make sure that your file names can be sorted
-        self.fList = glob.glob(directory+'*[0-9][0-9][0-9][0-9]*_*[0-9][0-9][0-9][0-9]*_*[0-9][0-9][0-9][0-9]*/processed_data/snapshot.h5')
-        self.nFiles = len(self.fList)
+        self.fList_t  = glob.glob(directory+'/train/*/processed_data/snapshot.h5')
+        self.nFiles_t = len(self.fList_t)
 
+        self.fList_v  = glob.glob(directory+'/validation/*/processed_data/snapshot.h5')
+        self.nFiles_v = len(self.fList_v)
 
-    def loadRandomBatch(self, batch_size):
+        print(self.nFiles_t, self.nFiles_v)
+
+    def loadRandomBatch(self, batch_size, bTrain=True):
         """
         Load a batch of data for training.
         """
+        if bTrain:
+            fList  = self.fList_t
+            nFiles = self.nFiles_t
+        else:
+            fList  = self.fList_v
+            nFiles = self.nFiles_v
+
 
         ps_lr = self.hr_patchsize // self.sr_factor
         ps_hr = self.hr_patchsize
@@ -116,7 +127,7 @@ class DataLoader():
         # Number of snapshots needed to fill the batch
         nPatches = self.hr_boxsize // self.hr_patchsize
 
-        snap_ids = np.random.randint(0, self.nFiles, batch_size) # Here I can split train/test :)
+        snap_ids = np.random.randint(0, nFiles, batch_size)
 
         # For each random snapshot, pick a random cube of size (lr/hr)_patchsize**3
         # If boxsize/patchsize is not integer, you won't fully exploit your snapshots
@@ -127,7 +138,7 @@ class DataLoader():
             # Select the patch position in the snapshot
             bIDX, bIDY, bIDZ = np.random.randint(0, nPatches, 3)
 
-            file = self.fList[snap_id]
+            file = fList[snap_id]
 
             with h5.File(file, 'r') as f:
                 hr = f['HR']
@@ -173,7 +184,7 @@ class DataLoader():
         hr_train = np.zeros([batch_size,hr_size,hr_size,hr_size,self.nChannels] )
 
         for bNum in range(batch_size):
-            file = self.fList[idx]
+            file = self.fList_t[idx%self.nFiles_t]
 
             with h5.File(file, 'r') as f:
                 hr = f['HR']
@@ -183,12 +194,18 @@ class DataLoader():
                     patch_hr = np.array(hr[channel])
                     # Take log(P) and log(rho)
                     if channel == 'rho':
+                        if np.min(patch_hr)<0:
+                            print(file)
                         patch_lr = np.log10(patch_lr)
                         patch_hr = np.log10(patch_hr)
+                        if np.sum(np.isnan(patch_hr))>0:
+                            print(file)
 
                     # Data normalization... to be explored
                     mean = np.mean(patch_hr)
                     std = np.std(patch_hr)
+                    if channel == 'rho':
+                        print(mean, std)
 
                     patch_lr = (patch_lr-mean)/std
                     patch_hr = (patch_hr-mean)/std

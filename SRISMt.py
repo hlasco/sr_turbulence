@@ -86,20 +86,21 @@ class SRISMt():
         self.output_dir = output_dir
         self.bNorm = bNorm
 
-        # Build & compile the generator network
-        self.generator = self.build_generator()
-        self.compile_generator(self.generator)
+
 
         # Initial epochs
         self.epoch_0 = 0
 
         # If training, build and compile the combined model
         if training_mode:
+            self.generator = self.build_generator()
+            self.compile_generator(self.generator)
             self.discriminator = self.build_discriminator()
+            self.discriminator.trainable = True
             self.compile_discriminator(self.discriminator)
+
             self.discriminator.trainable = False
             self.GAN = self.build_GAN() #Build and compile happens here
-            #self.discriminator.trainable = True
 
 
     def restart(self, gen_w=None, dis_w=None, epoch_0=0):
@@ -107,9 +108,15 @@ class SRISMt():
         if gen_w is not None:
             print('Restarting generator from weights: ', gen_w)
             self.generator = tf.keras.models.load_model(gen_w, compile=False)
+            self.compile_generator(self.generator)
         if dis_w is not None:
             print('Restarting discriminator from weights: ', dis_w)
+            self.discriminator.trainable = True
             self.discriminator = tf.keras.models.load_model(dis_w, compile=False)
+            self.compile_discriminator(self.discriminator)
+
+            self.discriminator.trainable = False
+            self.GAN = self.build_GAN()
 
     def build_generator(self):
         """
@@ -367,7 +374,7 @@ class SRISMt():
             self.data_directory,
         )
 
-        lr_image, hr_image = dl.loadRandomBatch(batch_size=1)
+        lr_image, hr_image = dl.loadRandomBatch(batch_size=1, bTrain=False)
 
         # At epoch end, this callback will plot a slice of Low-res/Super-res/High-res channels
         cbImg = cb.ImgCallback(
@@ -384,7 +391,7 @@ class SRISMt():
         # Need to handle restart epoch... Atm it's a parameter declared when restarting a model
         e0 = self.epoch_0
         for epoch in range(e0, n_epochs + e0):
-            lrs, hrs = dl.loadRandomBatch(batch_size=batch_size*step_per_epoch)
+            lrs, hrs = dl.loadRandomBatch(batch_size=batch_size*step_per_epoch, bTrain=True)
             print("\nEpoch {}/{}".format(epoch+1,n_epochs), flush=True)
             for step in range(step_per_epoch):
 
@@ -394,8 +401,8 @@ class SRISMt():
                 sr = self.generator.predict(lr)
 
                 # Here I could try to add some noise to improve the Discriminator
-                labels_real = np.ones(batch_size)  - np.random.uniform(low=0.0, high=0.2, size=batch_size)
-                labels_fake = np.zeros(batch_size) + np.random.uniform(low=0.0, high=0.2, size=batch_size)
+                labels_real = np.ones(batch_size)  - np.random.uniform(low=0.0, high=0.1, size=batch_size)
+                labels_fake = np.zeros(batch_size) + np.random.uniform(low=0.0, high=0.1, size=batch_size)
                 # Two training steps for the Discriminator
                 logs_D_real = self.discriminator.train_on_batch(x=hr, y=labels_real)
                 logs_D_fake = self.discriminator.train_on_batch(x=sr, y=labels_fake)

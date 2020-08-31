@@ -109,6 +109,12 @@ if __name__ == "__main__":
     print("\t\tDensity")
     rho_filt = downSample(rho)
 
+    bSave = np.min(rho) > 0
+    if not bSave:
+        print("\tNegative density, ignoring simulation")
+        print("Done")
+        sys.exit()
+
     print("\tSaving fields in {}".format(filename))
     with h5py.File(filename, 'w') as h5File:
         h5File.create_group('/HR')
