@@ -10,6 +10,7 @@
 
 module load volta cuda/10.1 cudnn
 
+
 eval "$(conda shell.bash hook)"
 conda activate pyenv
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK 
