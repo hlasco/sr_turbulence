@@ -1,7 +1,5 @@
 # Super-Resolution of ISM turbulence
 
-[Overleaf draft](https://www.overleaf.com/5721299619yyjhjshpgggb)
-
 ## Model
 
 The upsampling model is based on a GAN with a similar architecture as models used for super-resolution of 2D images.
