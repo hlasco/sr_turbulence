@@ -1,6 +1,9 @@
 #!/bin/bash
 
 SCRIPTPATH="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+PYTHON=$(eval which python)
+
+echo "Using python interpreter:" $PYTHON
 
 cd $SCRIPTPATH
 
@@ -12,6 +15,7 @@ cd $SCRIPTPATH
 
 echo "Adding Burger's turbulence transfer function to MUSIC plugins"
 cp boxicgen/transfer_simpleturb.cc music/src/plugins/
+sed -i "s@PYTHON=.*@PYTHON='${PYTHON}'@" boxicgen/generate_hydro_ic.sh
 
 echo "Building MUSIC"
 cd music && make

@@ -13,7 +13,7 @@ rt=.false.
 &AMR_PARAMS
 levelmin=8
 levelmax=8
-ngridmax=1048577
+ngridmax=8388608
 npartmax=5000000
 boxlen=100
 /
@@ -52,7 +52,7 @@ z_ave=1.0
 
 &SF_PARAMS
 sf_virial=.true.
-sr_model=5
+sf_model=5
 n_star=1.0d10
 T2_star=4.219409282700422
 g_star=1
