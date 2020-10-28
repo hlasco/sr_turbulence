@@ -1,6 +1,6 @@
 # Dataset Builder
 
-This module can be used to generate a dataset to train the Super-Resolution GAN. It is designed to run on machines using SLURM Workload Manager. 
+This module can be used to generate a dataset to train for the super-resolution problem applied to 3D compressible turbulence. It is designed to run on machines using SLURM Workload Manager. 
 
 ## Requirements
 
@@ -26,4 +26,7 @@ The script setup.sh will compile Ramses, MUSIC and Boxicgen.
 
 ## Running the code
 
-The script runNewSeeds.sh will successively spawn 100 simulations with different random seeds used for their initial condition. It uses a jobscript that is renewed on the completion of a simultion. You may need to update this jobscript to make it compatible with your machine.
+The script buildDataset.py will successively run pairs of HR/LR simulations at various initial Mach numbers, initialized with random seeds. Simulations are evolved during one turbulent crossing-time, which corresponds to a decay of kinetic energy of about a half. We assume that turbulence is then fully developed.
+Each simulation will be launched with its own jobscript after the completion of the previous one.
+
+The main parameters of the simulations can be controlled through the buildDataset.ini parameter file.
