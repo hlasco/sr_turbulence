@@ -19,8 +19,6 @@ def get_tcross(box, temp, mach, mu=2.37):
 
     return t_cross
 
-
-
 def get_seeds():
     seeds = np.random.randint(low=1000, high=9999, size=3)
     return seeds

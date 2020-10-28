@@ -13,8 +13,8 @@ rt=.false.
 &AMR_PARAMS
 levelmin=8
 levelmax=8
-ngridmax=8388608
-npartmax=5000000
+ngridmax=524288
+npartmax=1
 boxlen=100
 /
 
