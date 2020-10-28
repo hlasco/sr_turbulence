@@ -197,8 +197,7 @@ def process_xdmf(res, filename, h5_filename, dims):
         xmFile.write('''</Xdmf>\n''')
 
 if __name__ == "__main__":
-    base_dir = sys.argv[-2]
-    nGrid = sys.argv[-1]
+    base_dir = sys.argv[-1]
     print("Processing simulations {}".format(base_dir))
     if base_dir[-1] != os.path.sep:
         base_dir += os.path.sep
@@ -213,13 +212,13 @@ if __name__ == "__main__":
     	if not os.path.isdir(output_dir):
         	os.makedirs(output_dir)
 
-    HR_snapshot_path = base_dir + "HR_run/output_00002/info_00002.txt"
-    LR_snapshot_path = base_dir + "LR_run/output_00002/info_00002.txt"
+    HR_snapshot_path = base_dir + "/HR_run/output_00002/info_00002.txt"
+    LR_snapshot_path = base_dir + "/LR_run/output_00002/info_00002.txt"
     print("\tExtracting HR fields")
-    ux, uy, uz, rho = getCoveringGrids(HR_snapshot_path, N=nGrid)
+    ux, uy, uz, rho = getCoveringGrids(HR_snapshot_path, N=256)
 
     print("\tExtracting LR fields")
-    ux_l, uy_l, uz_l, rho_l = getCoveringGrids(LR_snapshot_path, N=nGrid//4)
+    ux_l, uy_l, uz_l, rho_l = getCoveringGrids(LR_snapshot_path, N=64)
 
     bSave = (np.min(rho) > 0) and (np.min(rho_l))
     if not bSave:

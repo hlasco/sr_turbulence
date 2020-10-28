@@ -2,7 +2,7 @@
 
 
 if [ $# -lt 2 ] ; then
-    echo "Usage: `basename "$0"`BASEPATH RUNDIR LEVEL TEND DT"
+    echo "Usage: `basename "$0"`BASEPATH RUNDIR LEVEL TEND"
     exit 1
 fi
 
@@ -11,7 +11,6 @@ BASEPATH=$1 #"/home/cluster/hlasco/scratch/boxicgen/"
 RUNDIR=$2
 LEVEL=$3
 TEND=$4
-DT=$5
 SCRIPTPATH="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
 MYNAME='whoami'
@@ -31,4 +30,4 @@ sed -i "s@levelmin=.*@levelmin=${LEVEL}@" namelist.nml
 sed -i "s@levelmax=.*@levelmax=${LEVEL}@" namelist.nml
 
 sed -i "s@delta_tout=.*@delta_tout=${TEND}@" namelist.nml
-sed -i "s@tend=.*@tend=${DT}@" namelist.nml
+sed -i "s@tend=.*@tend=${TEND}@" namelist.nml
