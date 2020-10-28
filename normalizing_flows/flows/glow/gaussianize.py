@@ -98,7 +98,7 @@ class LogGaussianize(Parameterize):
     
     def _inverse(self, x1, z2, **kwargs):
         params = self.parameterizer(x1)
-        mus, log_sigmas = params[:,:,:,0::2], params[:,:,:,1::2]
+        mus, log_sigmas = params[...,0::2], params[...,1::2]
         x2, ldj = log_gaussianize(z2, mus, log_sigmas, inverse=tf.constant(True))
         x2 = tf.where(z2 > self.epsilon, x2, z2)
         ldj = tf.where(z2 > self.epsilon, ldj, tf.zeros_like(ldj))

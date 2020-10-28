@@ -129,11 +129,12 @@ class CGlowFlowSR(GlowFlow):
     and vice versa. This can be corrected easily using the flows.Invert transform.
     """
     def __init__(self,
-                 input_shape=None,
+                 dim=2,
+                 input_channels=None,
                  upfactor=1,
                  num_layers=1,
                  depth=4,
-                 cond_shape=None,
+                 cond_channels=None,
                  cond_filters=64,
                  cond_resblocks=12,
                  cond_blocks=4,
@@ -155,9 +156,11 @@ class CGlowFlowSR(GlowFlow):
         cond_coupling_nn_ctor : function that constructs a Keras model for affine coupling steps
         act_norm    : if true, use act norm in Glow layers; otherwise, use batch norm
         """
-        self.cond_shape = cond_shape
-        if self.cond_shape is not None:
-            self.cond_fn = self._build_cond_fn(self.cond_shape, num_filters=cond_filters,
+        self.dim = dim
+        self.cond_channels = cond_channels
+        if self.cond_channels is not None:
+            cond_shape = tf.TensorShape((None, *[None for i in range(self.dim)], self.cond_channels))
+            self.cond_fn = self._build_cond_fn(cond_shape, num_filters=cond_filters,
                                  num_blocks=cond_blocks, num_resblocks=cond_resblocks)
             self.cond_shape = self.cond_fn.layers[-1].output_shape[-1]
 
@@ -183,7 +186,10 @@ class CGlowFlowSR(GlowFlow):
         self.parameterize = parameterize_ctor(i=num_layers-1, cond_shape=self.cond_shape)
 
         self.layers = [_layer(i) for i in range(num_layers)]
-        if input_shape is not None:
+
+        if input_channels is not None:
+            self.input_channels = input_channels
+            input_shape = tf.TensorShape((None, *[None for i in range(self.dim)], self.input_channels))
             self.initialize(input_shape)
 
     def _build_cond_fn(self, cond_shape, num_filters=64, kernel_size=3, num_blocks=4, num_resblocks=12):
@@ -223,7 +229,6 @@ class CGlowFlowSR(GlowFlow):
             layer.initialize(input_shape)
             input_shape = layer._forward_shape(input_shape)
         self.parameterize.initialize(input_shape)
-        self.dim = input_shape.rank - 2
 
     def _forward(self, x, return_zs=False, **kwargs):
         assert 'y_cond' in kwargs, 'y_cond must be supplied for conditional flow'

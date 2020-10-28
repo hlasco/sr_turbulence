@@ -50,7 +50,8 @@ class GlowFlow(Transform):
     and vice versa. This can be corrected easily using the flows.Invert transform.
     """
     def __init__(self,
-                 input_shape=None,
+                 dim=2,
+                 input_channels=None,
                  num_layers=1,
                  depth=4,
                  cond_shape=None,
@@ -81,12 +82,15 @@ class GlowFlow(Transform):
                               split_axis=None if i == num_layers - 1 else -1,
                               name=f'{name}_layer{i}')
         super().__init__(*args, name=name, **kwargs)
+        self.dim = dim
         self.num_layers = num_layers
         self.depth = depth
         self.cond_shape = cond_shape
         self.layers = [_layer(i) for i in range(num_layers)]
         self.parameterize = parameterize_ctor()
-        if input_shape is not None:
+        if input_channels is not None:
+            self.input_channels = input_channels
+            input_shape = tf.TensorShape((None, *[None for _ in range(self.dim)], self.input_channels))
             self.initialize(input_shape)
 
     def _build_cond_fn(self, cond_shape, z_shape):
@@ -115,7 +119,6 @@ class GlowFlow(Transform):
             layer.initialize(input_shape)
             input_shape = layer._forward_shape(input_shape)
         self.parameterize.initialize(input_shape)
-        self.dim = input_shape.rank - 2
         if self.cond_shape is not None:
             self.cond_fn = self._build_cond_fn(self.cond_shape, input_shape)
 
@@ -125,38 +128,18 @@ class GlowFlow(Transform):
             zs_reshaped.append(tf.reshape(z, (tf.shape(z)[0], -1)))
         return tf.concat(zs_reshaped, axis=-1)
 
-    def _unflatten_z_2d(self, z):
-        assert self.input_shape is not None
-        shape = z.shape#tf.shape(z)
-        hw = shape[1]
-        batch_size = shape[0]
-        n_channels = self.input_shape[-1]
-        w = int((np.sqrt(hw/n_channels)))
-        h = int((np.sqrt(hw/n_channels)))
-        input_shape = (batch_size, h, w, n_channels)
-        output_shape = self._forward_shape(input_shape)
-        st = np.prod(output_shape[1:])
-        z_k = tf.reshape(z[:,-st:], (batch_size, *output_shape[1:]))
-        zs = [z_k]
-        for i in range(self.num_layers-1):
-            layer_i = self.layers[self.num_layers-i-1]
-            output_shape = layer_i._inverse_shape(output_shape)
-            size_i = np.prod(output_shape[1:])
-            z_i = z[:,-st-size_i:-st]
-            zs.insert(0, tf.reshape(z_i, (batch_size, *output_shape[1:])))
-            st += size_i
-        return zs
-
-    def _unflatten_z_3d(self, z):
+    def _unflatten_z(self, z):
         assert self.input_shape is not None
         shape = tf.shape(z)
 
         batch_size = shape[0]
         n_channels = self.input_shape[-1]
-        h = int(np.ceil(np.power(shape[1]//n_channels, 1./3)))
-        w = int(np.ceil(np.power(shape[1]//n_channels, 1./3)))
-        d = int(np.ceil(np.power(shape[1]//n_channels, 1./3)))
-        input_shape = (batch_size, h, w, d, n_channels)
+
+        h = int(np.ceil(np.power(shape[1]//n_channels, 1./self.dim)))
+        
+        ndshape = [h for _ in range(self.dim)]
+
+        input_shape = (batch_size, *ndshape, n_channels)
         output_shape = self._forward_shape(input_shape)
         st = np.prod(output_shape[1:])
         z_k = tf.reshape(z[:,-st:], (batch_size, *output_shape[1:]))
@@ -169,12 +152,6 @@ class GlowFlow(Transform):
             zs.insert(0, tf.reshape(z_i, (batch_size, *output_shape[1:])))
             st += size_i
         return zs
-
-    def _unflatten_z(self, z):
-        if self.dim==2:
-            return self._unflatten_z_2d(z)
-        else:
-            return self._unflatten_z_3d(z)
 
     def _forward(self, x, return_zs=False, **kwargs):
         assert self.cond_shape is None or 'y_cond' in kwargs, 'y_cond must be supplied for conditional flow'

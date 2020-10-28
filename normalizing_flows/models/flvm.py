@@ -15,7 +15,8 @@ class FlowLVM(TrackableModule):
     def __init__(self,
                  transform: flows.transform.Transform,
                  prior: tfp.distributions.Distribution=tfp.distributions.Normal(loc=0.0, scale=1.0),
-                 input_shape=None,
+                 dim=2,
+                 input_channels=None,
                  num_bins=16,
                  cond_fn=None,
                  optimizer_flow=tf.keras.optimizers.Adam(lr=1.0E-4),
@@ -37,15 +38,17 @@ class FlowLVM(TrackableModule):
             super().__init__({'optimizer_cond': optimizer_cond}, name=name)
         self.prior = prior
         self.transform = transform
+        self.dim = dim
         self.num_bins = num_bins
 
         self.optimizer_flow = optimizer_flow
         self.optimizer_cond = optimizer_cond
         self.clip_grads = clip_grads
         self.scale_factor = np.log2(num_bins) if num_bins is not None else 0.0
-        self.input_shape = input_shape
-        if self.input_shape is not None:
-            self.initialize(self.input_shape)
+        self.input_channels = input_channels
+        if self.input_channels is not None:
+            input_shape = tf.TensorShape((None,*[None for i in range(self.dim)], self.input_channels))
+            self.initialize(input_shape)
 
 
     def initialize(self, input_shape):
@@ -112,13 +115,6 @@ class FlowLVM(TrackableModule):
             gradients, grad_norm = tf.clip_by_global_norm(gradients, self.clip_grads)
         self.optimizer_flow.apply_gradients(zip(gradients, train_var))
 
-        #if self.cond_fn is not None and 'y_cond' in flow_kwargs:
-        #    train_var = self.transform.get_trainable_variables()['cond']
-        #    gradients = tf.gradients(loss_flow, train_var)
-        #    if self.clip_grads:
-        #        gradients, grad_norm = tf.clip_by_global_norm(gradients, self.clip_grads)
-        #    self.optimizer_cond.apply_gradients(zip(gradients, train_var))
-
         return loss_flow, y_loss, nll, nldj, prior_log_probs
 
     def train(self, train_data: tf.data.Dataset, steps_per_epoch, num_epochs=1, conditional=False, init=False, **flow_kwargs):
@@ -169,10 +165,11 @@ class FlowLVM(TrackableModule):
             x, _ = self.transform.forward(z)
         return x
 
-    def sample(self, n=1, shape=(1,32,32,1), tau=1.0, y_cond=None):
+    def sample(self, n=1, shape=32, tau=1.0, y_cond=None):
         assert self.input_shape is not None, 'model not initialized'
         batch_size = 1 if y_cond is None else y_cond.shape[0]
         event_ndims = self.prior.event_shape.rank
+        shape = (1,*[shape for _ in range(self.dim)], self.input_channels)
         z_shape = shape[1:]
 
         z = tau*self.prior.sample((n*batch_size,*z_shape[:len(z_shape)-event_ndims]))
@@ -181,36 +178,28 @@ class FlowLVM(TrackableModule):
             # repeat y_cond n times along batch axis
             y_cond = tf.repeat(y_cond, n, axis=0)
         ret = self.decode(z, y_cond=y_cond).numpy()
-
-        #for i in range(n*batch_size):
-        #    std_y = tf.math.reduce_std(y_cond[i//n,...])
-        #    std = tf.math.reduce_std(ret[i,...])
-        #    v = tf.math.reduce_max(tf.math.abs(ret[i,...]))
-        #    while v > 10*std and tau > 0:#:s
-        #        print(i, 'Resampling', tf.math.reduce_std(ret[i,...]), v)
-        #        z = tau*self.prior.sample((1,*z_shape[:len(z_shape)-event_ndims]))
-        #        z = tf.reshape(z, (1, -1))
-        #        cond = tf.expand_dims(y_cond[i//n,...], axis=0)
-        #        ret[i,...] = self.decode(z, y_cond=cond)[0,...]
-        #        std = tf.math.reduce_std(ret[i,...])
-        #        v = tf.math.reduce_max(tf.math.abs(ret[i,...]))
         return ret
 
     def param_count(self):
         return self.transform.param_count()
 
     def test(self, shape, **kwargs):
-        if kwargs['y_shape'] is not None:
+        if 'y_shape' in kwargs and kwargs['y_shape'] is not None:
             y_shape = kwargs['y_shape'].copy()
+            y_shape = (1,*[y_shape for _ in range(self.dim)], self.cond_channels)
+
+        shape = (1,*[shape for _ in range(self.dim)], self.input_channels)
 
         self.transform._test(shape, **kwargs)
 
         print('Testing full model:')
         normal = tfp.distributions.Normal(loc=0.0, scale=1.0)
         x = normal.sample(shape)
-        if self.transform._cond_fn is not None and 'y_shape' in kwargs:
+        if 'y_shape' in kwargs and self.transform._cond_fn is not None:
             normal = tfp.distributions.Normal(loc=0, scale=1.0)
             y_cond = normal.sample(y_shape)
+        else:
+            y_cond = None
 
         z, fldj = self.transform.forward(x, y_cond=y_cond)
         assert np.all(np.isfinite(z)), 'forward has nan output'

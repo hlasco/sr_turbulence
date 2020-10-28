@@ -27,29 +27,27 @@ class Parameterize(Transform):
         with 'num_parameters' parameters. Can be overridden by subclasses.
         """
 
-        def Conv(rank, num_filters, kernel_size, **kwargs):
-            if z_shape.rank==4:
+        def Conv(dim, num_filters, kernel_size, **kwargs):
+            if dim==2:
                 return Conv2D(num_filters, kernel_size, dtype=tf.float32, **kwargs)
             else:
                 return Conv3D(num_filters, kernel_size, dtype=tf.float32, **kwargs)
 
-        rank = z_shape.rank
-        if z_shape.rank==4:
-            x = Input((z_shape[1], z_shape[2], z_shape[3] + cond_shape), dtype=tf.float32)
-        else:
-            x = Input((z_shape[1], z_shape[2], z_shape[3], z_shape[4]+cond_shape), dtype=tf.float32)
+        dim = z_shape.rank -2
+        shape = (*[None for _ in range(dim)], z_shape[-1] + cond_shape)
+        x = Input(shape, dtype=tf.float32)
         params = []
         for i in range(self.num_parameters):
-            h = Conv(rank, self.num_filters, kernel_size=3, padding='same', activation='relu', 
-                      kernel_initializer=RandomNormal(stddev=0.01), name=f'{self.name}/conv{rank-2}d_param{2*i}')(x)
-            h = Conv(rank, self.num_filters, kernel_size=3, padding='same', activation='relu', 
-                      kernel_initializer=RandomNormal(stddev=0.01), name=f'{self.name}/conv{rank-2}d_param{2*i+1}')(h)
+            h = Conv(dim, self.num_filters, kernel_size=3, padding='same', activation='relu', 
+                      kernel_initializer=RandomNormal(stddev=0.01), name=f'{self.name}/conv{dim}d_param{2*i}')(x)
+            h = Conv(dim, self.num_filters, kernel_size=3, padding='same', activation='relu', 
+                      kernel_initializer=RandomNormal(stddev=0.01), name=f'{self.name}/conv{dim}d_param{2*i+1}')(h)
             params.append(h)
 
         params = tf.concat(params, axis=-1)
 
-        params = Conv(rank, self.num_parameters*z_shape[-1], kernel_size=3, padding='same',
-                      kernel_initializer=RandomNormal(stddev=0.01), name=f'{self.name}/conv{rank-2}d')(params)
+        params = Conv(dim, self.num_parameters*z_shape[-1], kernel_size=3, padding='same',
+                      kernel_initializer=RandomNormal(stddev=0.01), name=f'{self.name}/conv{dim}d')(params)
         model = Model(inputs=x, outputs=params)
         return model
 

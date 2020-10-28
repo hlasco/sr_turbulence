@@ -29,10 +29,8 @@ def injector_nn_glow(dim=2, min_filters=32, max_filters=512, kernel_size=3, num_
 
     def f(dim, i, c_in, c_out, log_scale: tf.Variable, base_name):
         num_filters = np.maximum(max_filters//((2**(dim-1))**i), min_filters)
-        if dim==2:
-            x = Input((None,None,c_in), dtype=tf.float32)
-        else:
-            x = Input((None, None,None,c_in), dtype=tf.float32)
+        shape = (*[None for _ in range(dim)], c_in)
+        x = Input(shape, dtype=tf.float32)
         h = Conv(dim, num_filters, kernel_size, padding='same', kernel_regularizer=l2(alpha), name=f'{base_name}/conv{dim}d_1')(x)
         
         #h = ActNorm(name=f'{base_name}/act_norm_1')(h)
