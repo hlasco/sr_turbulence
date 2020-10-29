@@ -160,8 +160,8 @@ if __name__ == "__main__":
     	if not os.path.isdir(output_dir):
         	os.makedirs(output_dir)
 
-    HR_snapshot_path = base_dir + "/HR_run/output_00002/info_00002.txt"
-    LR_snapshot_path = base_dir + "/LR_run/output_00002/info_00002.txt"
+    HR_snapshot_path = base_dir + "/HR_run/output_00001/info_00001.txt"
+    LR_snapshot_path = base_dir + "/HR_run/output_00001/info_00001.txt"
     print("\tExtracting HR fields")
     ux, uy, uz, rho = getCoveringGrids(HR_snapshot_path, N=256)
 
@@ -175,15 +175,15 @@ if __name__ == "__main__":
         sys.exit()
 
     print("\tDownsampling fields")
-    sigma_list = [2,4,8]
+    scale_list = [2,4,8]
     print("\t\tVelocity_x")
-    ux_filt  = [downSample(ux,  sigma=s) for s in sigma_list]
-    print("\t\tVelocity_y") 
-    uy_filt  = [downSample(uy,  sigma=s) for s in sigma_list]
+    ux_filt  = [downSample(ux,  s) for s in scale_list]
+    print("\t\tVelocity_y")
+    uy_filt  = [downSample(uy,  s) for s in scale_list]
     print("\t\tVelocity_z")
-    uz_filt  = [downSample(uz,  sigma=s) for s in sigma_list]
+    uz_filt  = [downSample(uz,  s) for s in scale_list]
     print("\t\tDensity")
-    rho_filt = [downSample(rho, sigma=s) for s in sigma_list]
+    rho_filt = [downSample(rho, s) for s in scale_list]
 
     print("\tSaving fields in {}".format(filename))
     with h5py.File(filename, 'w') as h5File:
@@ -194,7 +194,7 @@ if __name__ == "__main__":
         LR = h5File.create_group('/LR')
         saveFields(LR, ux_l, uy_l, uz_l, rho_l)
 
-        for i, s in enumerate(sigma_list):
+        for i, s in enumerate(scale_list):
             FILT = h5File.create_group('/FILT{}'.format(s))
             saveFields(FILT, ux_filt[i], uy_filt[i], uz_filt[i], rho_filt[i])
 
