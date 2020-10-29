@@ -9,7 +9,7 @@ cd $SCRIPTPATH
 
 echo "Building Ramses"
 cd ramses/bin && make -f $SCRIPTPATH/ramses_tools/Makefile.ramses3d
-cp ramses3d $SCRIPTPATH/simulation
+cp ramses3d $SCRIPTPATH/ramses_tools/simulation
 
 cd $SCRIPTPATH
 
@@ -18,7 +18,7 @@ cp boxicgen/transfer_simpleturb.cc music/src/plugins/
 sed -i "s@PYTHON=.*@PYTHON='${PYTHON}'@" boxicgen/generate_hydro_ic.sh
 
 echo "Building MUSIC"
-cd music && make
+cd music && cmake . && make
 
 cd ../boxicgen
 

@@ -5,18 +5,12 @@ import yt
 from yt.funcs import mylog
 mylog.setLevel(40)
 
-from scipy import ndimage
+from scipy.ndimage import gaussian_filter
 import scipy.stats as stats
 
-# Gaussian kernel for filtering
-filt1D = np.array([0.04997364, 0.13638498, 0.20002636, 0.22723004, 0.20002636, 0.13638498, 0.04997364])
-filt1Dx = np.reshape(filt1D, newshape=(-1,1,1))
-filt1Dy = np.reshape(filt1D, newshape=(1,-1,1))
-filt1Dz = np.reshape(filt1D, newshape=(1,1,-1))
-filt3D = filt1Dx * filt1Dy * filt1Dz
-
-def downSample(field):
-    ret = ndimage.convolve(field, filt3D, mode='wrap')[::4,::4,::4]
+def downSample(field, downscale=4):
+    sigma = downscale / np.pi
+    ret = gaussian_filter(field, sigma=sigma)[::downscale,::downscale,::downscale]
     return ret
 
 def decompose_field(u, v, w):
@@ -153,49 +147,6 @@ def saveFields(h5Group, ux, uy, uz, rho):
     h5Group.create_dataset('P', data=P)
     h5Group.create_dataset('k', data=k)
 
-def process_xdmf(res, filename, h5_filename, dims):
-    with open(filename, 'w') as xmFile:
-        xmFile.write('''<?xml version="1.0" ?>\n''')
-        xmFile.write('''<!DOCTYPE Xdmf SYSTEM "Xdmf.dtd" []>\n''')
-        xmFile.write('''<Xdmf Version="2.0">\n''')
-        xmFile.write('''\t<Domain>\n''')
-        xmFile.write('''\t\t<Grid Name="Box" GridType="Uniform">\n''')
-        xmFile.write('''\t\t\t<Topology TopologyType="3DCORECTMesh" NumberOfElements="{} {} {}" />\n'''.format(dims[0], dims[1], dims[2]))
-        xmFile.write('''\t\t\t<Geometry GeometryType="ORIGIN_DXDYDZ">\n''')
-        xmFile.write('''\t\t\t\t<DataItem Name="origin" Dimensions="3" NumberType="Float" Precision="4" Format="XML">\n''')
-        xmFile.write('''\t\t\t\t\t0.0 0.0 0.0\n''')
-        xmFile.write('''\t\t\t\t</DataItem>\n ''')
-        xmFile.write('''\t\t\t\t<DataItem Name="spacing" Dimensions="3" NumberType="Float" Precision="4" Format="XML">\n''')
-        xmFile.write('''\t\t\t\t\t{} {} {}\n'''.format(100./(dims[0]-1), 100./(dims[1]-1), 100./(dims[2]-1)))
-        xmFile.write('''\t\t\t\t</DataItem>\n ''')
-        xmFile.write('''\t\t\t</Geometry>\n''')
-
-        #HR density
-        xmFile.write('''\t\t\t<Attribute AttributeType="Scalar" Center="Node" Name="Density">\n''')
-        xmFile.write('''\t\t\t\t<DataItem DataType="Float" Dimensions="{} {} {}" Format="HDF" Precision="8">\n'''.format(dims[0], dims[1], dims[2]))
-        xmFile.write('''\t\t\t\t\t{}:/{}/rho/ \n'''.format(h5_filename, res))
-        xmFile.write('''\t\t\t\t</DataItem>\n ''')
-        xmFile.write('''\t\t\t</Attribute>\n''')
-
-        #HR velocity
-        xmFile.write('''\t\t\t<Attribute AttributeType="Vector" Center="Node" Name="Velocity">\n''')
-        xmFile.write('''\t\t\t\t<DataItem ItemType="Function" Function="join($0, $1, $2)" Dimensions="{} {} {} 3">\n'''.format(dims[0], dims[1], dims[2]))
-        xmFile.write('''\t\t\t\t\t<DataItem DataType="Float" Dimensions="{} {} {}" Format="HDF" Precision="8">\n'''.format(dims[0], dims[1], dims[2]))
-        xmFile.write('''\t\t\t\t\t{}:/{}/ux/ \n'''.format(h5_filename, res))
-        xmFile.write('''\t\t\t\t\t</DataItem>\n ''')
-        xmFile.write('''\t\t\t\t\t<DataItem DataType="Float" Dimensions="{} {} {}" Format="HDF" Precision="8">\n'''.format(dims[0], dims[1], dims[2]))
-        xmFile.write('''\t\t\t\t\t{}:/{}/uy/ \n'''.format(h5_filename, res))
-        xmFile.write('''\t\t\t\t\t</DataItem>\n ''')
-        xmFile.write('''\t\t\t\t\t<DataItem DataType="Float" Dimensions="{} {} {}" Format="HDF" Precision="8">\n'''.format(dims[0], dims[1], dims[2]))
-        xmFile.write('''\t\t\t\t\t{}:/{}/uz/ \n'''.format(h5_filename, res))
-        xmFile.write('''\t\t\t\t\t</DataItem>\n ''')
-        xmFile.write('''\t\t\t\t</DataItem>\n ''')
-
-        xmFile.write('''\t\t\t</Attribute>\n''')
-        xmFile.write('''\t\t</Grid>\n''')
-        xmFile.write('''\t</Domain>\n''')
-        xmFile.write('''</Xdmf>\n''')
-
 if __name__ == "__main__":
     base_dir = sys.argv[-1]
     print("Processing simulations {}".format(base_dir))
@@ -204,9 +155,6 @@ if __name__ == "__main__":
 
     output_dir = base_dir+"processed_data/"
     filename = output_dir+"snapshot.h5"
-    filename_LR_xdmf = output_dir+"low_resolution.xdmf"
-    filename_FILT_xdmf = output_dir+"filtered.xdmf"
-    filename_HR_xdmf = output_dir+"high_resolution.xdmf"
 
     if yt.is_root():
     	if not os.path.isdir(output_dir):
@@ -227,31 +175,28 @@ if __name__ == "__main__":
         sys.exit()
 
     print("\tDownsampling fields")
+    sigma_list = [2,4,8]
     print("\t\tVelocity_x")
-    ux_filt = downSample(ux)
-    print("\t\tVelocity_y")
-    uy_filt = downSample(uy)
+    ux_filt  = [downSample(ux,  sigma=s) for s in sigma_list]
+    print("\t\tVelocity_y") 
+    uy_filt  = [downSample(uy,  sigma=s) for s in sigma_list]
     print("\t\tVelocity_z")
-    uz_filt = downSample(uz)
+    uz_filt  = [downSample(uz,  sigma=s) for s in sigma_list]
     print("\t\tDensity")
-    rho_filt = downSample(rho)
+    rho_filt = [downSample(rho, sigma=s) for s in sigma_list]
 
     print("\tSaving fields in {}".format(filename))
     with h5py.File(filename, 'w') as h5File:
 
-        LR = h5File.create_group('/LR')
-        saveFields(LR, ux_l, uy_l, uz_l, rho_l)
-
-        FILT = h5File.create_group('/FILT')
-        saveFields(FILT, ux_filt, uy_filt, uz_filt, rho_filt)
-
         HR = h5File.create_group('/HR')
         saveFields(HR, ux, uy, uz, rho)
 
+        LR = h5File.create_group('/LR')
+        saveFields(LR, ux_l, uy_l, uz_l, rho_l)
 
-    print("\tSaving xdmf files")
-    process_xdmf('LR', filename_LR_xdmf, "snapshot.h5", [64,64,64])
-    process_xdmf('FILT', filename_FILT_xdmf, "snapshot.h5", [64,64,64])
-    process_xdmf('HR', filename_HR_xdmf, "snapshot.h5", [256,256,256])
+        for i, s in enumerate(sigma_list):
+            FILT = h5File.create_group('/FILT{}'.format(s))
+            saveFields(FILT, ux_filt[i], uy_filt[i], uz_filt[i], rho_filt[i])
+
     print("Done")
 
