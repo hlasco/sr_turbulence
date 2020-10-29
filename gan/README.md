@@ -18,16 +18,3 @@ If you want to use our dataBuilder, pull this repository with the --recursive fl
 ## Requirements
 
 python3, tensorflow>2.0, h5py, numpy
-
-
-## Results
-
-### Velocity slice
-![alt text](fig/zoom_u_gan.png)
-
-### Density slice
-![alt text](fig/zoom_rho_gan.png)
-
-### Energy and Density spectra
-
-![alt text](fig/spectrum.png)
