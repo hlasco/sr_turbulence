@@ -4,8 +4,6 @@ import numpy as np
 from flows.transform import Transform
 from . import affine
 
-
-
 def injector_nn_glow(dim=2, min_filters=32, max_filters=512, kernel_size=3, num_blocks=4, alpha=1.0E-5, epsilon=1.0E-4):
     from tensorflow.keras import Model
     from tensorflow.keras.layers import Input, Conv2D, Conv3D,  BatchNormalization, Activation, Lambda, add

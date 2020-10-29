@@ -119,14 +119,11 @@ def cglow_SR_layer(layer_index, cond_shape, upfactor,
 
 class CGlowFlowSR(GlowFlow):
     """
-    Glow normalizing flow (Kingma et al, 2018).
-    Note that all Glow ops define forward as x -> z (data to encoding)
-    rather than the canonical interpretation of z -> x. Conversely,
-    inverse is defined as z -> x (encoding to data). The implementations
-    provided by this module are written to be consistent with the
-    terminology as defined by the Glow authors. Note that this is inconsistent
-    with the 'flows' module in general, which specifies 'forward' as z -> x
-    and vice versa. This can be corrected easily using the flows.Invert transform.
+    Conditional Glow normalizing flow for Super-Resolution.
+    Attempts to learn a variational approximation for the joint distribution p(x,z|y)
+    where x and y corresponds to HR and LR images. The conditioning input y is first processed by the
+    encoding network defined in _build_cond_fn, then used in the flow operations cond_coupling, injector,
+    and cond_gaussianize.
     """
     def __init__(self,
                  dim=2,
@@ -147,13 +144,21 @@ class CGlowFlowSR(GlowFlow):
                  *args, **kwargs):
         """
         Creates a new Glow normalizing flow with the given configuration.
-
-        input_shape : shape of input; can be provided here or at a later time to 'initialize'
-        num_layers  : number of "layers" in the multi-scale Glow architecture
-        depth_per_layer : number of glow steps per layer
-
-        parameterize_ctor : a function () -> Paramterize (see consructor docs for Split)
-        cond_coupling_nn_ctor : function that constructs a Keras model for affine coupling steps
+        dim            : the spatial dimension of the input x
+        input_channels : the channel dimension of the input x; 
+                         can be provided here or at a later time to 'initialize'
+        num_layers     : number of "layers" in the multi-scale Glow architecture
+        depth          : number of glow steps per layer
+        cond_channels  : the channel dimension of the conditional input y. At initialization,
+                         this dimension is updated to the channel dimension of ENCODED contitional input
+                         cond_fn(y)
+        cond_filters   : number of filters in the encoding network
+        cond_resbkocks : number of residual blocks in the encoding network
+        cond_blocks    : number of bocks in the encoding network
+        parameterize_ctor       : a function () -> Paramterize (see consructor docs for Split)
+        affine_coupling_nn_ctor : function that constructs a Keras model for affine coupling steps
+        cond_coupling_nn_ctor   : function that constructs a Keras model for conditional coupling steps
+        injector_nn_ctor        : function that constructs a Keras model for injector steps
         act_norm    : if true, use act norm in Glow layers; otherwise, use batch norm
         """
         self.dim = dim

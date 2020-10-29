@@ -27,9 +27,12 @@ class FlowLVM(TrackableModule):
         transform     : a bijective transform to be applied to the initial variational density;
                         note that this is assumed to be a transform z -> x where the inverse is x -> z
         prior         : a tfp.distributions.Distribution representing the prior, p(z)
-        input_shape   : the shape of the observed variables, x
+        dim           : the spatial dimension of input
+        input_channels: the number of channels of the observed variables, x
         num_bins      : for discrete input spaces: number of discretized bins; i.e. num_bins = 2^(num_bits)
-        optimizer     : optimizer to use during training
+        cond_fn       : the conditioning function, for conditional mode
+        optimizer_flow: optimizer to use during training the model
+        optimizer_cond: optimizer to use during training of the conditioning network only
         clip_grads    : If not None and > 0, the gradient clipping ratio for clip_by_global_norm;
                         otherwise, no gradient clipping is applied
         """

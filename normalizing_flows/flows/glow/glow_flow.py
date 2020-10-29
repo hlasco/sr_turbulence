@@ -62,10 +62,11 @@ class GlowFlow(Transform):
                  *args, **kwargs):
         """
         Creates a new Glow normalizing flow with the given configuration.
-
-        input_shape : shape of input; can be provided here or at a later time to 'initialize'
-        num_layers  : number of "layers" in the multi-scale Glow architecture
-        depth_per_layer : number of glow steps per layer
+        dim             : spatial dimension of the input
+        input_channels  : channel dimension of the input; can be provided here 
+                          or at a later time to 'initialize'
+        num_layers      : number of "layers" in the multi-scale Glow architecture
+        depth           : number of glow steps per layer
 
         parameterize_ctor : a function () -> Paramterize (see consructor docs for Split)
         coupling_nn_ctor : function that constructs a Keras model for affine coupling steps
