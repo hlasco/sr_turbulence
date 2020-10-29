@@ -9,8 +9,8 @@ from scipy.ndimage import gaussian_filter
 import scipy.stats as stats
 
 def downSample(field, downscale=4):
-    sigma = downscale / np.pi
-    ret = gaussian_filter(field, sigma=sigma)[::downscale,::downscale,::downscale]
+    sigma = downscale /(2*np.pi)
+    ret = gaussian_filter(field, sigma=sigma, mode='wrap')[::downscale,::downscale,::downscale]
     return ret
 
 def decompose_field(u, v, w):
