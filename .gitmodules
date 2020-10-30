@@ -1,6 +1,8 @@
 [submodule "dataBuilder/music"]
 	path = dataBuilder/music
 	url = https://bitbucket.org/ohahn/music/src/master/
+    ignore = dirty
 [submodule "dataBuilder/ramses"]
 	path = dataBuilder/ramses
 	url = https://bitbucket.org/rteyssie/ramses/src/master/
+    ignore = dirty

@@ -31,7 +31,6 @@ def write_jobscript_header(f):
 def write_jobscript():
     f = open(job_path,'w')
     write_jobscript_header(f)
-    f.write("#SBATCH --time=4:00:00 \n")
     f.write("#SBATCH --output=runBuildDataset.txt \n\n")
 
     tend = get_tcross(float(config_sim['boxsize']),
@@ -53,21 +52,21 @@ def write_jobscript():
 
     f.write("cd HR_run\n")
     f.write("export OMP_NUM_THREADS=1\n")
-    f.write("mpirun simulation namelist.nml > ramses_logs.txt\n\n")
+    f.write("srun simulation namelist.nml > ramses_logs.txt\n\n")
 
     f.write("cd ../LR_run\n")
     f.write("export OMP_NUM_THREADS=1\n")
-    f.write("mpirun simulation namelist.nml > ramses_logs.txt\n\n")
+    f.write("srun simulation namelist.nml > ramses_logs.txt\n\n")
 
     f.write("cd ..\n")
     f.write("python {}/postProcess.py .> postProcess_logs.txt\n".format(script_path))
 
-    f.write("rm -rf HR_run/output_00001\n")
-    f.write("rm -rf HR_run/output_00002\n")
-    f.write("rm -rf ic_box3\n")
-    f.write("rm -rf LR_run/output_00001\n")
-    f.write("rm -rf LR_run/output_00002\n")
-    f.write("rm -rf ic_box3\n")
+    f.write("#rm -rf HR_run/output_00001\n")
+    f.write("#rm -rf HR_run/output_00002\n")
+    f.write("#rm -rf ic_box3\n")
+    f.write("#rm -rf LR_run/output_00001\n")
+    f.write("#rm -rf LR_run/output_00002\n")
+    f.write("#rm -rf ic_box3\n")
 
     f.write("cd {}\n".format(script_path))
     f.write("./buildDataset.py --config_file {} --sim_id {}\n".format(args.config_file, args.sim_id+1))
@@ -101,7 +100,7 @@ if __name__ == "__main__":
     N_sim_per_mach = int(config_sim['nsim_max'])
     N_sim_tot = int(config_sim['nsim_max'])*len(mach_list)
 
-    if (args.sim_id>N_sim_tot):
+    if (args.sim_id>=N_sim_tot):
         print('Done')
         sys.exit(0)
 
