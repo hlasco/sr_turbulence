@@ -35,7 +35,7 @@ def write_jobscript():
     f.write("#SBATCH --output=runBuildDataset.txt \n\n")
 
     tend = get_tcross(float(config_sim['boxsize']),
-	              float(config_sim['temp']),
+                      float(config_sim['temp']),
                       float(mach))
 
     f.write("{}/prepareSimulation.sh {} {} {} {:.4f}\n\n".format(
@@ -59,11 +59,11 @@ def write_jobscript():
     if config_sim['machine']=='hydra':
         run_cmd = 'mpirun'
 
-    f.write("{} -n {} simulation namelist.nml > ramses_logs.txt\n\n".format(run_cmd, config_job['ntasks-per-node']))
+    f.write("{} simulation namelist.nml > ramses_logs.txt\n\n".format(run_cmd))
 
     f.write("cd ../LR_run\n")
     f.write("export OMP_NUM_THREADS=1\n")
-    f.write("{} -n {} simulation namelist.nml > ramses_logs.txt\n\n".format(run_cmd, config_job['ntasks-per-node']))
+    f.write("{} simulation namelist.nml > ramses_logs.txt\n\n".format(run_cmd))
 
     f.write("cd ..\n")
     f.write("python {}/postProcess.py --base_dir {} --level_HR {} --level_LR {} > postProcess_logs.txt\n".format(script_path, '.', config_sim['level_HR'], config_sim['level_LR']))

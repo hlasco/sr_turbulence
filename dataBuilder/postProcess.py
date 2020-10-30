@@ -153,6 +153,7 @@ if __name__ == "__main__":
     parser.add_argument('--base_dir', dest='base_dir', help='Directory containing LR and HR simulations.')
     parser.add_argument('--level_HR', dest='level_HR', type=int, help='AMR maximum level for the HR simulation')
     parser.add_argument('--level_LR', dest='level_LR', type=int, help='AMR maximum level for the LR simulation')
+    parser.set_defaults(base_dir='.')
     parser.set_defaults(level_HR=8)
     parser.set_defaults(level_LR=6)
     args = parser.parse_args()
@@ -165,8 +166,8 @@ if __name__ == "__main__":
     filename = output_dir+"snapshot.h5"
 
     if yt.is_root():
-    	if not os.path.isdir(output_dir):
-        	os.makedirs(output_dir)
+        if not os.path.isdir(output_dir):
+            os.makedirs(output_dir)
 
     HR_snapshot_path = args.base_dir + "/HR_run/output_00002/info_00002.txt"
     LR_snapshot_path = args.base_dir + "/LR_run/output_00002/info_00002.txt"
