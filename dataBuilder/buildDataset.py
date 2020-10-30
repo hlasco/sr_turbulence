@@ -23,33 +23,32 @@ def get_seeds():
     seeds = np.random.randint(low=1000, high=9999, size=3)
     return seeds
 
-def write_jobscript():
-
-    f = open(job_path,'w')
+def write_jobscript_header(f):
     f.write("#!/bin/bash \n")
-    f.write("#SBATCH --partition=teyssier \n")
-    f.write("#SBATCH --time=12:00:00 \n")
-    f.write("#SBATCH --output=runBuildDataset.txt \n")
-    f.write("#SBATCH --nodes=1 \n")
-    f.write("#SBATCH --ntasks-per-node={} \n".format(config['N_TASKS']))
-    f.write("#SBATCH --cpus-per-task=1 \n")
-    f.write("#SBATCH --hint=nomultithread \n\n")
+    for key in config_job.keys():
+        f.write("#SBATCH --{}={} \n".format(key, config_job[key]))
 
-    tend = get_tcross(float(config['boxsize']),
-	              float(config['temp']),
+def write_jobscript():
+    f = open(job_path,'w')
+    write_jobscript_header(f)
+    f.write("#SBATCH --time=4:00:00 \n")
+    f.write("#SBATCH --output=runBuildDataset.txt \n\n")
+
+    tend = get_tcross(float(config_sim['boxsize']),
+	              float(config_sim['temp']),
                       float(mach))
 
     f.write("{}/prepareSimulation.sh {} {} {} {:.4f}\n\n".format(
-                script_path, base_path, run_dir_HR, config['level_HR'], tend))
+                script_path, base_path, run_dir_HR, config_sim['level_HR'], tend))
 
     f.write("{}/prepareSimulation.sh {} {} {} {:.4f}\n\n".format(
-                script_path, base_path, run_dir_LR, config['level_LR'], tend))
+                script_path, base_path, run_dir_LR, config_sim['level_LR'], tend))
 
     f.write("cd {} \n".format(ic_dir))
-    f.write("export OMP_NUM_THREADS={} \n".format(config['N_TASKS']))
+    f.write("export OMP_NUM_THREADS={} \n".format(config_job['ntasks-per-node']))
     f.write("{}/boxicgen/generate_hydro_ic.sh {} {} {} {} {} {} {} {} > music_logs.txt \n\n".format(
-                script_path, mach, config['boxsize'], config['temp'],
-                config['level_HR'], config['level_LR'], str(s[0]), str(s[1]), str(s[2])))
+                script_path, mach, config_sim['boxsize'], config_sim['temp'],
+                config_sim['level_HR'], config_sim['level_LR'], str(s[0]), str(s[1]), str(s[2])))
 
 
     f.write("cd HR_run\n")
@@ -78,7 +77,7 @@ if __name__ == "__main__":
 
     script_path = os.path.dirname(os.path.abspath(__file__))
 
-    parser = argparse.ArgumentParser(description = "Run calibration simulations.")
+    parser = argparse.ArgumentParser(description = "Run simulations and post process simulations of compressible turbulence at various mach number.")
     parser.add_argument('--config_file', dest='config_file', help="Configuration file.")
     parser.set_defaults(config_file='buildDataset.ini')
     parser.add_argument('--sim_id', dest='sim_id', type=int, help="ID of the current simulation.")
@@ -87,16 +86,20 @@ if __name__ == "__main__":
 
     config = ConfigParser()
     config.read(args.config_file)
-    config = config['all']
 
-    base_path = config['BASEPATH']+'/'
+    machine = config['sim']['machine']
+
+    config_job = config[machine]
+    config_sim = config['sim']
+
+    base_path = config_sim['basepath']+'/'
     os.makedirs(base_path, exist_ok=True)
     os.chdir(base_path)
 
-    mach_list = config['mach_0'].split(',')
+    mach_list = config_sim['mach_0'].split(',')
 
-    N_sim_per_mach = int(config['NSIM_MAX'])
-    N_sim_tot = int(config['NSIM_MAX'])*len(mach_list)
+    N_sim_per_mach = int(config_sim['nsim_max'])
+    N_sim_tot = int(config_sim['nsim_max'])*len(mach_list)
 
     if (args.sim_id>N_sim_tot):
         print('Done')
@@ -106,7 +109,7 @@ if __name__ == "__main__":
 
     s = get_seeds()
 
-    ic_dir = "{}/mach_{}/{}_{}_{}".format(config['SIMTYPE'], mach.zfill(2), str(s[0]), str(s[1]), str(s[2]))
+    ic_dir = "{}/mach_{}/{}_{}_{}".format(config_sim['simtype'], mach.zfill(2), str(s[0]), str(s[1]), str(s[2]))
     run_dir_HR = "{}/HR_run".format(ic_dir)
     run_dir_LR = "{}/LR_run".format(ic_dir)
 

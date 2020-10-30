@@ -160,8 +160,8 @@ if __name__ == "__main__":
     	if not os.path.isdir(output_dir):
         	os.makedirs(output_dir)
 
-    HR_snapshot_path = base_dir + "/HR_run/output_00001/info_00001.txt"
-    LR_snapshot_path = base_dir + "/HR_run/output_00001/info_00001.txt"
+    HR_snapshot_path = base_dir + "/HR_run/output_00002/info_00002.txt"
+    LR_snapshot_path = base_dir + "/HR_run/output_00002/info_00002.txt"
     print("\tExtracting HR fields")
     ux, uy, uz, rho = getCoveringGrids(HR_snapshot_path, N=256)
 
