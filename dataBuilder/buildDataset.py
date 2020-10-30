@@ -26,7 +26,8 @@ def get_seeds():
 def write_jobscript_header(f):
     f.write("#!/bin/bash \n")
     for key in config_job.keys():
-        f.write("#SBATCH --{}={} \n".format(key, config_job[key]))
+        if key != 'basepath':
+            f.write("#SBATCH --{}={} \n".format(key, config_job[key]))
 
 def write_jobscript():
     f = open(job_path,'w')
@@ -52,14 +53,20 @@ def write_jobscript():
 
     f.write("cd HR_run\n")
     f.write("export OMP_NUM_THREADS=1\n")
-    f.write("srun simulation namelist.nml > ramses_logs.txt\n\n")
+
+
+    run_cmd = 'srun'
+    if config_sim['machine']=='hydra':
+        run_cmd = 'mpirun'
+
+    f.write("{} -n {} simulation namelist.nml > ramses_logs.txt\n\n".format(run_cmd, config_job['ntasks-per-node']))
 
     f.write("cd ../LR_run\n")
     f.write("export OMP_NUM_THREADS=1\n")
-    f.write("srun simulation namelist.nml > ramses_logs.txt\n\n")
+    f.write("{} -n {} simulation namelist.nml > ramses_logs.txt\n\n".format(run_cmd, config_job['ntasks-per-node']))
 
     f.write("cd ..\n")
-    f.write("python {}/postProcess.py .> postProcess_logs.txt\n".format(script_path))
+    f.write("python {}/postProcess.py --base_dir {} --level_HR {} --level_LR {} > postProcess_logs.txt\n".format(script_path, '.', config_sim['level_HR'], config_sim['level_LR']))
 
     f.write("#rm -rf HR_run/output_00001\n")
     f.write("#rm -rf HR_run/output_00002\n")
@@ -78,7 +85,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description = "Run simulations and post process simulations of compressible turbulence at various mach number.")
     parser.add_argument('--config_file', dest='config_file', help="Configuration file.")
-    parser.set_defaults(config_file='buildDataset.ini')
+    parser.set_defaults(config_file='config.ini')
     parser.add_argument('--sim_id', dest='sim_id', type=int, help="ID of the current simulation.")
     parser.set_defaults(sim_id=0)
     args = parser.parse_args()
@@ -91,7 +98,7 @@ if __name__ == "__main__":
     config_job = config[machine]
     config_sim = config['sim']
 
-    base_path = config_sim['basepath']+'/'
+    base_path = config_job['basepath']+'/'
     os.makedirs(base_path, exist_ok=True)
     os.chdir(base_path)
 

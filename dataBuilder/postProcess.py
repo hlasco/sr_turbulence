@@ -1,4 +1,5 @@
 import sys, os
+import argparse
 import numpy as np
 import h5py
 import yt
@@ -148,25 +149,34 @@ def saveFields(h5Group, ux, uy, uz, rho):
     h5Group.create_dataset('k', data=k)
 
 if __name__ == "__main__":
-    base_dir = sys.argv[-1]
-    print("Processing simulations {}".format(base_dir))
-    if base_dir[-1] != os.path.sep:
-        base_dir += os.path.sep
+    parser = argparse.ArgumentParser(description = "Post processing script.")
+    parser.add_argument('--base_dir', dest='base_dir', help='Directory containing LR and HR simulations.')
+    parser.add_argument('--level_HR', dest='level_HR', type=int, help='AMR maximum level for the HR simulation')
+    parser.add_argument('--level_LR', dest='level_LR', type=int, help='AMR maximum level for the LR simulation')
+    parser.set_defaults(level_HR=8)
+    parser.set_defaults(level_LR=6)
+    args = parser.parse_args()
 
-    output_dir = base_dir+"processed_data/"
+    print("Processing simulations {}".format(args.base_dir))
+    if args.base_dir[-1] != os.path.sep:
+        args.base_dir += os.path.sep
+
+    output_dir = args.base_dir+"processed_data/"
     filename = output_dir+"snapshot.h5"
 
     if yt.is_root():
     	if not os.path.isdir(output_dir):
         	os.makedirs(output_dir)
 
-    HR_snapshot_path = base_dir + "/HR_run/output_00002/info_00002.txt"
-    LR_snapshot_path = base_dir + "/LR_run/output_00002/info_00002.txt"
+    HR_snapshot_path = args.base_dir + "/HR_run/output_00002/info_00002.txt"
+    LR_snapshot_path = args.base_dir + "/LR_run/output_00002/info_00002.txt"
     print("\tExtracting HR fields")
-    ux, uy, uz, rho = getCoveringGrids(HR_snapshot_path, N=256)
+    n_HR = 2**args.level_HR
+    ux, uy, uz, rho = getCoveringGrids(HR_snapshot_path, N=n_HR)
 
     print("\tExtracting LR fields")
-    ux_l, uy_l, uz_l, rho_l = getCoveringGrids(LR_snapshot_path, N=64)
+    n_LR = 2**args.level_LR
+    ux_l, uy_l, uz_l, rho_l = getCoveringGrids(LR_snapshot_path, N=n_LR)
 
     bSave = (np.min(rho) > 0) and (np.min(rho_l))
     if not bSave:
