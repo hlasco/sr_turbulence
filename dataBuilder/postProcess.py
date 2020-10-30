@@ -161,7 +161,7 @@ if __name__ == "__main__":
         	os.makedirs(output_dir)
 
     HR_snapshot_path = base_dir + "/HR_run/output_00002/info_00002.txt"
-    LR_snapshot_path = base_dir + "/HR_run/output_00002/info_00002.txt"
+    LR_snapshot_path = base_dir + "/LR_run/output_00002/info_00002.txt"
     print("\tExtracting HR fields")
     ux, uy, uz, rho = getCoveringGrids(HR_snapshot_path, N=256)
 
@@ -175,7 +175,7 @@ if __name__ == "__main__":
         sys.exit()
 
     print("\tDownsampling fields")
-    scale_list = [2,4,8]
+    scale_list = [2,4,8,16]
     print("\t\tVelocity_x")
     ux_filt  = [downSample(ux,  s) for s in scale_list]
     print("\t\tVelocity_y")
