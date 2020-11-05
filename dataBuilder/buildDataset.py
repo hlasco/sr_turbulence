@@ -68,12 +68,12 @@ def write_jobscript():
     f.write("cd ..\n")
     f.write("python {}/postProcess.py --base_dir {} --level_HR {} --level_LR {} > postProcess_logs.txt\n".format(script_path, '.', config_sim['level_HR'], config_sim['level_LR']))
 
-    f.write("#rm -rf HR_run/output_00001\n")
-    f.write("#rm -rf HR_run/output_00002\n")
-    f.write("#rm -rf ic_box3\n")
-    f.write("#rm -rf LR_run/output_00001\n")
-    f.write("#rm -rf LR_run/output_00002\n")
-    f.write("#rm -rf ic_box3\n")
+    f.write("rm -rf HR_run/output_00001\n")
+    f.write("rm -rf HR_run/output_00002\n")
+    f.write("rm -rf ic_box3\n")
+    f.write("rm -rf LR_run/output_00001\n")
+    f.write("rm -rf LR_run/output_00002\n")
+    f.write("rm -rf ic_box3\n")
 
     f.write("cd {}\n".format(script_path))
     f.write("./buildDataset.py --config_file {} --sim_id {}\n".format(args.config_file, args.sim_id+1))

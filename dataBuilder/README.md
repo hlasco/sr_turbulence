@@ -29,4 +29,4 @@ The script setup.sh will compile Ramses, MUSIC and Boxicgen.
 The script buildDataset.py will successively run pairs of HR/LR simulations at various initial Mach numbers, initialized with random seeds. Simulations are evolved during one turbulent crossing-time, which corresponds to a decay of kinetic energy of about a half. We assume that turbulence is then fully developed.
 Each simulation will be launched with its own jobscript after the completion of the previous one.
 
-The main parameters of the simulations can be controlled through the buildDataset.ini parameter file.
+The main parameters of the simulations can be controlled through the config.ini parameter file.
