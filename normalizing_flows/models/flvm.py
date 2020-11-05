@@ -17,6 +17,7 @@ class FlowLVM(TrackableModule):
                  prior: tfp.distributions.Distribution=tfp.distributions.Normal(loc=0.0, scale=1.0),
                  dim=2,
                  input_channels=None,
+                 cond_channels=None,
                  num_bins=16,
                  cond_fn=None,
                  optimizer_flow=tf.keras.optimizers.Adam(lr=1.0E-4),
@@ -49,6 +50,7 @@ class FlowLVM(TrackableModule):
         self.clip_grads = clip_grads
         self.scale_factor = np.log2(num_bins) if num_bins is not None else 0.0
         self.input_channels = input_channels
+        self.cond_channels  = cond_channels
         if self.input_channels is not None:
             input_shape = tf.TensorShape((None,*[None for i in range(self.dim)], self.input_channels))
             self.initialize(input_shape)
@@ -120,24 +122,29 @@ class FlowLVM(TrackableModule):
 
         return loss_flow, y_loss, nll, nldj, prior_log_probs
 
-    def train(self, train_data: tf.data.Dataset, steps_per_epoch, num_epochs=1, conditional=False, init=False, **flow_kwargs):
-        train_data = train_data.take(steps_per_epoch).repeat(num_epochs)
+    def train(self, train_data: tf.data.Dataset, bs, dset_bs, steps_per_epoch, num_epochs=1, conditional=False, init=False, **flow_kwargs):
+        fac_bs = dset_bs // bs
+        steps_per_epoch = steps_per_epoch - steps_per_epoch % fac_bs
+        train_data = train_data.take(steps_per_epoch // fac_bs).repeat(num_epochs)
         hist = dict()
         init = tf.constant(init) # init variable for data-dependent initialization
         with tqdm(total=steps_per_epoch*num_epochs) as prog:
             for epoch in range(num_epochs):
-                for i, batch in enumerate(train_data.take(steps_per_epoch)):
+                for i, batch in enumerate(train_data.take(steps_per_epoch // fac_bs)):
                     if conditional:
                         x, y = batch
-                        loss_flow, loss_cond, nll, nldj, p  = self.train_batch(x, y_cond=y, init=init, **flow_kwargs)
-                        utils.update_metrics(hist, lf=loss_flow.numpy(), p=p.numpy(), nldj=nldj.numpy())
+                        for x_, y_ in zip(tf.split(x, fac_bs, axis=0), tf.split(y, fac_bs, axis=0)):
+                            loss_flow, loss_cond, nll, nldj, p  = self.train_batch(x_, y_cond=y_, init=init, **flow_kwargs)
+                            init=tf.constant(False)
+                            utils.update_metrics(hist, lf=loss_flow.numpy(), p=p.numpy(), nldj=nldj.numpy())
                     else:
                         x = batch
-                        loss_flow, _, nll, nldj, p  = self.train_batch(x, init=init, **flow_kwargs)
-                        utils.update_metrics(hist, lf=loss_flow.numpy(), p=p.numpy(), nldj=nldj.numpy())
-                    init=tf.constant(False)
+                        for x_ in tf.split(x, bs, axis=0):
+                            loss_flow, _, nll, nldj, p  = self.train_batch(x_, init=init, **flow_kwargs)
+                            init=tf.constant(False)
+                            utils.update_metrics(hist, lf=loss_flow.numpy(), p=p.numpy(), nldj=nldj.numpy())
                     prog.set_postfix({k: v[0] for k,v in hist.items()})
-                    prog.update(1)
+                    prog.update(dset_bs)
 
     def evaluate(self, validation_data: tf.data.Dataset, validation_steps, conditional=False, **flow_kwargs):
         validation_data = validation_data.take(validation_steps)
@@ -188,7 +195,7 @@ class FlowLVM(TrackableModule):
 
     def test(self, shape, **kwargs):
         if 'y_shape' in kwargs and kwargs['y_shape'] is not None:
-            y_shape = kwargs['y_shape'].copy()
+            y_shape = kwargs['y_shape']#.copy()
             y_shape = (1,*[y_shape for _ in range(self.dim)], self.cond_channels)
 
         shape = (1,*[shape for _ in range(self.dim)], self.input_channels)

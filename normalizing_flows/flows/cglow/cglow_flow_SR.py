@@ -293,7 +293,6 @@ class CGlowFlowSR(GlowFlow):
         ret = tf.math.reduce_sum([t.param_count(_) for t in self.layers])
         ret += self.parameterize.param_count(_)
         ret += self.cond_fn.count_params()
-        print(self.cond_fn.count_params())
         return ret
 
     def _test(self, shape, **kwargs):
