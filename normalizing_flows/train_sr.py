@@ -10,7 +10,6 @@ tf.get_logger().setLevel('ERROR')
 tf.autograph.set_verbosity(3)
 import utils as u
 import argparse
-from configparser import ConfigParser
 from shutil import copyfile
 
 
@@ -20,7 +19,7 @@ if __name__ == "__main__":
     parser.set_defaults(config_file='config_sr.ini')
     args = parser.parse_args()
 
-    config = ConfigParser()
+    config = u.MyConfigParser()
     config.read(args.config_file)
 
     print('Using configuration file :{}'.format(args.config_file), flush=True)
@@ -36,9 +35,9 @@ if __name__ == "__main__":
     print("Build model with",model.param_count(),"parameters.", flush=True)
     bInit = u.get_bInit(config)
 
-    ckpt_freq = int(config['training']['ckpt_freq'])
-    nsteps_tot = int(config['training']['nsteps'])
-    bs = int(config['training']['batch_size'])
+    ckpt_freq = config.getint('training', 'ckpt_freq')
+    nsteps_tot = config.getint( 'training',  'nsteps')
+    bs = config.getint('training', 'batch_size')
 
     dset, dset_bs = u.get_dataset(config)
 

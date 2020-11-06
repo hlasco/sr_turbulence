@@ -16,6 +16,26 @@ from flows.glow.affine_coupling import coupling_nn_glow
 from flows.cglow.affine_injector import injector_nn_glow
 from models.flvm import FlowLVM
 
+from configparser import RawConfigParser
+from configparser import ConfigParser, NoOptionError
+
+class MyConfigParser(RawConfigParser):
+    def get(self, section, option):
+        try:
+            return RawConfigParser.get(self, section, option)
+        except NoOptionError:
+            return None
+    def getint(self, section, option):
+        try:
+            return int(RawConfigParser.get(self, section, option))
+        except NoOptionError:
+            return None
+    def getfloat(self, section, option):
+        try:
+            return float(RawConfigParser.get(self, section, option))
+        except NoOptionError:
+            return None
+
 def get_inpt_channels(config):
     config = config['training']
 
@@ -59,7 +79,7 @@ def get_rundir(config):
     return run_dir
 
 def get_bInit(config):
-    if int(config['training']['restart'])==0:
+    if config.getint('training','restart')==0:
         return True
     rundir = get_rundir(config)
     ckpt_path = tf.train.latest_checkpoint(rundir)
@@ -69,7 +89,7 @@ def get_bInit(config):
         return True
 
 def get_model(config, restart=False):
-    dim = int(config['flow']['dim'])
+    dim = config.getint('flow','dim')
     inpt_channels = get_inpt_channels(config)
     cond_channels = get_cond_channels(config)
 
@@ -80,10 +100,10 @@ def get_model(config, restart=False):
     injector = injector_nn_glow(**kwargs_nn)
     parametrizer = cond_gaussianize(**kwargs_nn)
 
-    kwargs_flow = get_kwargs(config, section='flow', 
+    kwargs_flow = get_kwargs(config, section='flow',
          keys=['upfactor', 'num_layers', 'depth'])
 
-    kwargs_cond = get_kwargs(config, section='cond', 
+    kwargs_cond = get_kwargs(config, section='cond',
          keys=['cond_channels', 'cond_filters', 'cond_resblocks', 'cond_blocks'])
 
 
@@ -93,8 +113,8 @@ def get_model(config, restart=False):
                               injector_nn_ctor=injector,
                               parameterize_ctor=parametrizer))
 
-    learning_rate = float(config['training']['learning_rate'])
-    num_bins = int(config['training']['num_bins'])
+    learning_rate = float(config.getfloat('training','learning_rate'))
+    num_bins = config.getint('training', 'num_bins')
 
     prior = tfp.distributions.Normal(loc=0.0, scale=1.0)
     opt_flow = tf.keras.optimizers.Adam(learning_rate=learning_rate)
@@ -104,7 +124,7 @@ def get_model(config, restart=False):
     print("Model built with",model.param_count().numpy(),"parameters.", flush=True)
     model._init_checkpoint()
 
-    if int(config['training']['restart']) > 0 or restart:
+    if config.getint('training','restart') > 0 or restart:
         rundir = get_rundir(config)
         print("Restoring from latest checkpoint in:", rundir)
         ckpt_path = tf.train.latest_checkpoint(rundir)
@@ -114,15 +134,16 @@ def get_model(config, restart=False):
     return model
 
 def get_dataset(config):
-    dset_dir = config['paths']['dset_dir']
-    turb_type = config['training']['turb_type']
-    upfactor = int(config['flow']['upfactor'])
-    hr_patch_size = int(config['training']['hr_patch_size'])
-    hr_sim_size = int(config['training']['hr_sim_size'])
-    channel_type = config['training']['channel_type']
+
+    dset_dir = config.get('paths','dset_dir')
+    turb_type = config.get('training','turb_type')
+    upfactor = config.getint('flow','upfactor')
+    hr_patch_size = config.getint('training','hr_patch_size')
+    hr_sim_size = config.getint('training','hr_sim_size')
+    channel_type = config.get('training','channel_type')
     if turb_type == 'compressible':
         mach = list(map(int, config['training']['mach'].split(',')))
-        if int(config['flow']['dim']) == 3:
+        if config.getint('flow','dim')== 3:
             return get_dataset_compressible_3d(dset_dir, mach, hr_patch_size, hr_sim_size, upfactor, channel_type)
         else:
             # return get_dataset_compressible_2d(dset_dir, mach, hr_patch_size, hr_sim_size, upfactor, channel_type)
@@ -141,7 +162,7 @@ def get_dataset_compressible_3d(dset_dir, mach, hr_ps, hr_sim_size, upfactor, ch
     else:
         channels_hr = ['ux', 'uy', 'uz', 's']
 
-    
+
 
     upfactor = int(2**upfactor)
     lr_ps = hr_ps // upfactor
@@ -161,7 +182,7 @@ def get_dataset_compressible_3d(dset_dir, mach, hr_ps, hr_sim_size, upfactor, ch
             for numc, c in enumerate(channels_lr):
 
                 lr = np.array(fi[lr_key+c], dtype=np.float32)
-                
+
                 mean = att['{}_mean'.format(c)]
                 sdev = att['{}_std2'.format(c)]**.5
 
