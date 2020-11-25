@@ -10,7 +10,7 @@ from scipy.ndimage import gaussian_filter
 import scipy.stats as stats
 
 def downSample(field, downscale=4):
-    sigma = downscale /(2*np.pi)
+    sigma = .5*downscale
     ret = gaussian_filter(field, sigma=sigma, mode='wrap')[::downscale,::downscale,::downscale]
     return ret
 
@@ -99,7 +99,7 @@ def getCoveringGrids(snapshot_path, N=256):
     level=0
     dims = [int(N), int(N), int(N)]
     cube = ds_box.covering_grid(level,
-			left_edge=[0.0, 0.0, 0.0],
+                        left_edge=[0.0, 0.0, 0.0],
                         dims=dims,
                         # And any fields to preload (this is optional!)
                         fields=["velocity_x", "velocity_y", "velocity_z", "density"])
@@ -163,7 +163,7 @@ if __name__ == "__main__":
         args.base_dir += os.path.sep
 
     output_dir = args.base_dir+"processed_data/"
-    filename = output_dir+"snapshot.h5"
+    filename = output_dir+"snapshots.h5"
 
     if yt.is_root():
         if not os.path.isdir(output_dir):
