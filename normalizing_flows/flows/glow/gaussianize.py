@@ -1,5 +1,6 @@
 import tensorflow as tf
 import tensorflow_probability as tfp
+import numpy as np
 from flows.transform import Transform
 from . import Parameterize
 
@@ -12,45 +13,50 @@ def gaussianize(x, mus, log_sigmas, inverse=tf.constant(False)):
         z = (x - mus)*tf.math.exp(-log_sigmas)
         ldj = -tf.math.reduce_sum(log_sigmas, axis=[i for i in range(1, rank)])
     return z, ldj
+
+def Gaussianize(dim=2, min_filters=32, max_filters=32, *args, **kwargs):
+    class _gaussianize(Parameterize):
+        """
+        Implementation of parameterize for a Gaussian prior. Corresponds to the "Gaussianization" step in Glow (Kingma et al, 2018).
+        """
+        def __init__(self, i=0, input_shape=None, name='gaussianize', *args, **kwargs):
+            self.num_filters = np.maximum(max_filters//((2**(dim-1))**i), min_filters)
+            if 'cond_channels' in kwargs:
+                kwargs['cond_channels'] = 0
+            super().__init__(*args, num_parameters=2, num_filters=self.num_filters, input_shape=input_shape, name=name, **kwargs)
+            
+        def _forward(self, x1, x2, **kwargs):
+            params = self.parameterizer(x1)
+            mus, log_sigmas = params[...,0::2], params[...,1::2]
+            z2, fldj = gaussianize(x2, mus, log_sigmas)
+            return z2, fldj
         
-class Gaussianize(Parameterize):
-    """
-    Implementation of parameterize for a Gaussian prior. Corresponds to the "Gaussianization" step in Glow (Kingma et al, 2018).
-    """
-    def __init__(self, input_shape=None, name='gaussianize', *args, **kwargs):
-        super().__init__(*args, num_parameters=2, num_filters=32, input_shape=input_shape, name=name, **kwargs)
-        
-    def _forward(self, x1, x2, **kwargs):
-        params = self.parameterizer(x1)
-        mus, log_sigmas = params[...,0::2], params[...,1::2]
-        z2, fldj = gaussianize(x2, mus, log_sigmas)
-        return z2, fldj
+        def _inverse(self, x1, z2, **kwargs):
+            params = self.parameterizer(x1)
+            mus, log_sigmas = params[...,0::2], params[...,1::2]
+            x2, ildj = gaussianize(z2, mus, log_sigmas, inverse=tf.constant(True))
+            return x2, ildj
     
-    def _inverse(self, x1, z2, **kwargs):
-        params = self.parameterizer(x1)
-        mus, log_sigmas = params[...,0::2], params[...,1::2]
-        x2, ildj = gaussianize(z2, mus, log_sigmas, inverse=tf.constant(True))
-        return x2, ildj
-
-    def _test(self, shape, **kwargs):
-        import numpy as np
-        print('Testing', self.name)
-        x = tf.random.normal(shape, dtype=tf.float32)
-        z, fldj = self._forward(tf.zeros_like(x), x, dtype=tf.float32)
-        x_, ildj = self._inverse(tf.zeros_like(x), z, dtype=tf.float32)
-        #np.testing.assert_array_almost_equal(np.mean(z), 0.0, decimal=2)
-        #np.testing.assert_array_almost_equal(np.std(z), 1.0, decimal=2)
-        np.testing.assert_array_almost_equal(x_, x, decimal=5)
-        np.testing.assert_array_equal(ildj, -fldj)
-        err_x = tf.reduce_mean(x_-x)
-        err_ldj = tf.reduce_mean(ildj+fldj)
-        print("\tError on forward inverse pass:")
-        print("\t\tx-F^{-1}oF(x):", err_x.numpy())
-        print("\t\tildj+fldj:", err_ldj.numpy())
-        print('\t passed')
-
-    def param_count(self, _):
-        return self.parameterizer.count_params()
+        def _test(self, shape, **kwargs):
+            import numpy as np
+            print('Testing', self.name)
+            x = tf.random.normal(shape, dtype=tf.float32)
+            z, fldj = self._forward(tf.zeros_like(x), x, dtype=tf.float32)
+            x_, ildj = self._inverse(tf.zeros_like(x), z, dtype=tf.float32)
+            #np.testing.assert_array_almost_equal(np.mean(z), 0.0, decimal=2)
+            #np.testing.assert_array_almost_equal(np.std(z), 1.0, decimal=2)
+            np.testing.assert_array_almost_equal(x_, x, decimal=5)
+            np.testing.assert_array_equal(ildj, -fldj)
+            err_x = tf.reduce_mean(x_-x)
+            err_ldj = tf.reduce_mean(ildj+fldj)
+            print("\tError on forward inverse pass:")
+            print("\t\tx-F^{-1}oF(x):", err_x.numpy())
+            print("\t\tildj+fldj:", err_ldj.numpy())
+            print('\t passed')
+    
+        def param_count(self, _):
+            return self.parameterizer.count_params()
+    return _gaussianize
     
 def log_gaussianize(x, mus, log_sigmas, inverse=tf.constant(False)):
     """

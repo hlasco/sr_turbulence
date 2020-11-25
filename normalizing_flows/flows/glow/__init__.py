@@ -4,5 +4,5 @@ from .squeeze import Squeeze
 from .parameterize import Parameterize
 from .gaussianize import Gaussianize, LogGaussianize
 from .split import Split
-from .affine_coupling import AffineCoupling, coupling_nn_glow, affine
+from .affine_coupling import AffineCoupling, affine
 from .glow_flow import GlowFlow, glow_step, glow_layer

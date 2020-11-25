@@ -3,7 +3,8 @@ import tensorflow_probability as tfp
 import numpy as np
 from flows.flow import Flow
 from flows.transform import Transform
-#from normalizing_flows.flows.affine import BatchNorm
+from flows.networks.coupling_nn import coupling_nn
+from flows.networks.cond_nn import cond_nn
 from . import (
     GlowFlow,
     InvertibleConv,
@@ -11,15 +12,11 @@ from . import (
     Squeeze,
     Split,
     CondAffineCoupling,
-    AffineCoupling,
     AffineInjector,
     CondSplit,
+    CondGaussianize,
     Gaussianize,
-    cond_gaussianize,
     Parameterize,
-    cond_coupling_nn_glow,
-    coupling_nn_glow,
-    injector_nn_glow,
 )
 
 def getMesh(dim, s, x_min, x_max):
@@ -68,53 +65,45 @@ def reshape_cond(y_cond, i_layer, upfactor):
         y_reshaped = reshape_volume(y_cond, newshape)
     return y_reshaped
 
-def cglow_SR_step(depth_index, layer_index, cond_shape, upfactor,
-                  affine_coupling_nn_ctor=coupling_nn_glow(),
-                  cond_coupling_nn_ctor=cond_coupling_nn_glow(),
-                  injector_nn_ctor=injector_nn_glow(),
-                  name='cglow_SR_step'):
+def cglow_SR_step(depth_index, layer_index, cond_channels, upfactor, nn_ctor=coupling_nn(), name='cglow_SR_step'):
 
     norm = ActNorm(name=f'{name}_act_norm')
 
-    injector = AffineInjector(layer_index, cond_shape, nn_ctor=injector_nn_ctor,
+    injector = AffineInjector(layer_index, cond_channels, nn_ctor=nn_ctor,
                                 name=f'{name}_affine_injector')
 
 
-    if layer_index < 2 :
+    if layer_index < 5 :
         inv_conv = InvertibleConv(name=f'{name}_inv_conv')
-        coupling = CondAffineCoupling(layer_index, cond_shape, nn_ctor=cond_coupling_nn_ctor,
+        coupling = CondAffineCoupling(layer_index, cond_channels, nn_ctor=nn_ctor,
                                 name=f'{name}_cond_affine_coupling', reverse=False)
-        flow_steps = [norm, inv_conv, coupling, injector]
+        flow_steps = [norm, inv_conv, injector, coupling]
     else:
-        coupling = CondAffineCoupling(layer_index, cond_shape, nn_ctor=cond_coupling_nn_ctor,
+        coupling = CondAffineCoupling(layer_index, cond_channels, nn_ctor=nn_ctor,
                                 name=f'{name}_cond_affine_coupling', reverse=True)
-        flow_steps = [norm, coupling, injector]
+        flow_steps = [norm, injector, coupling]
 
     return Flow(flow_steps)
 
-def cglow_SR_layer(layer_index, cond_shape, upfactor,
+def cglow_SR_layer(layer_index, cond_channels, upfactor,
                parameterize: Parameterize,
                depth=4,
-               affine_coupling_nn_ctor=coupling_nn_glow(),
-               cond_coupling_nn_ctor=cond_coupling_nn_glow(),
-               injector_nn_ctor=injector_nn_glow(),
+               nn_ctor=coupling_nn(),
                split_axis=-1,
                act_norm=True,
                name='glow_layer'):
     squeeze = Squeeze(name=f'{name}_squeeze')
 
-    steps = Flow.uniform(depth, lambda i: cglow_SR_step(i, layer_index, cond_shape, upfactor,
-                                                    affine_coupling_nn_ctor=affine_coupling_nn_ctor,
-                                                    cond_coupling_nn_ctor=cond_coupling_nn_ctor,
-                                                    injector_nn_ctor=injector_nn_ctor,
-                                                    name=f'{name}_step{i}'))
+    steps = Flow.uniform(depth, lambda i: cglow_SR_step(i, layer_index, cond_channels, upfactor,
+                                                        nn_ctor=nn_ctor,
+                                                        name=f'{name}_step{i}'))
 
     norm = ActNorm(name=f'{name}_act_norm')
     inv_conv = InvertibleConv(name=f'{name}_inv_conv')
 
     layer_steps = [squeeze, norm, inv_conv, steps]
     if split_axis is not None:
-        layer_steps.append(CondSplit(parameterize, cond_shape=cond_shape, split_axis=split_axis, name=f'{name}_split'))
+        layer_steps.append(CondSplit(parameterize, cond_channels=cond_channels, split_axis=split_axis, name=f'{name}_split'))
     return Flow(layer_steps)
 
 class CGlowFlowSR(GlowFlow):
@@ -122,7 +111,7 @@ class CGlowFlowSR(GlowFlow):
     Conditional Glow normalizing flow for Super-Resolution.
     Attempts to learn a variational approximation for the joint distribution p(x,z|y)
     where x and y corresponds to HR and LR images. The conditioning input y is first processed by the
-    encoding network defined in _build_cond_fn, then used in the flow operations cond_coupling, injector,
+    encoding network defined in cond_fn, then used in the flow operations cond_coupling, injector,
     and cond_gaussianize.
     """
     def __init__(self,
@@ -131,14 +120,9 @@ class CGlowFlowSR(GlowFlow):
                  upfactor=1,
                  num_layers=1,
                  depth=4,
-                 cond_channels=None,
-                 cond_filters=64,
-                 cond_resblocks=12,
-                 cond_blocks=4,
-                 parameterize_ctor =cond_gaussianize(),
-                 affine_coupling_nn_ctor=coupling_nn_glow(),
-                 cond_coupling_nn_ctor=cond_coupling_nn_glow(),
-                 injector_nn_ctor=injector_nn_glow(),
+                 parameterize_ctor=Gaussianize(),
+                 coupling_ctor=coupling_nn(),
+                 cond_ctor=cond_nn(),
                  act_norm=True,
                  name='cglow_flow',
                  *args, **kwargs):
@@ -149,36 +133,23 @@ class CGlowFlowSR(GlowFlow):
                          can be provided here or at a later time to 'initialize'
         num_layers     : number of "layers" in the multi-scale Glow architecture
         depth          : number of glow steps per layer
-        cond_channels  : the channel dimension of the conditional input y. At initialization,
-                         this dimension is updated to the channel dimension of ENCODED contitional input
-                         cond_fn(y)
-        cond_filters   : number of filters in the encoding network
-        cond_resbkocks : number of residual blocks in the encoding network
-        cond_blocks    : number of bocks in the encoding network
         parameterize_ctor       : a function () -> Paramterize (see consructor docs for Split)
-        affine_coupling_nn_ctor : function that constructs a Keras model for affine coupling steps
-        cond_coupling_nn_ctor   : function that constructs a Keras model for conditional coupling steps
-        injector_nn_ctor        : function that constructs a Keras model for injector steps
+        coupling_ctor : function that constructs a Keras model for the coupling networks
+        cond_ctor     : function that constructs a Keras model for conditioning network
         act_norm    : if true, use act norm in Glow layers; otherwise, use batch norm
         """
         self.dim = dim
-        self.cond_channels = cond_channels
-        if self.cond_channels is not None:
-            cond_shape = tf.TensorShape((None, *[None for i in range(self.dim)], self.cond_channels))
-            self.cond_fn = self._build_cond_fn(cond_shape, num_filters=cond_filters,
-                                 num_blocks=cond_blocks, num_resblocks=cond_resblocks)
-            self.cond_shape = self.cond_fn.layers[-1].output_shape[-1]
+        self.cond_fn = cond_ctor()
+        self.cond_channels = self.cond_fn.layers[-1].output_shape[-1]
 
         def _layer(i):
             """Builds layer i; omits split op for final layer"""
             assert i < num_layers, f'expected i < {num_layers}; got {i}'
-            return cglow_SR_layer(i,self.cond_shape, upfactor,
+            return cglow_SR_layer(i,self.cond_channels, upfactor,
                               parameterize_ctor(i=i, name=f'{name}_layer{i}_param',
-                                                cond_shape=self.cond_shape),
+                                                cond_channels=self.cond_channels),
                               depth=depth,
-                              affine_coupling_nn_ctor=affine_coupling_nn_ctor,
-                              cond_coupling_nn_ctor=cond_coupling_nn_ctor,
-                              injector_nn_ctor=injector_nn_ctor,
+                              nn_ctor=coupling_ctor,
                               act_norm=act_norm,
                               split_axis=None if i == num_layers - 1 else -1,
                               name=f'{name}_layer{i}')
@@ -188,7 +159,7 @@ class CGlowFlowSR(GlowFlow):
         self.depth = depth
 
         self.upfactor = upfactor
-        self.parameterize = parameterize_ctor(i=num_layers-1, cond_shape=self.cond_shape)
+        self.parameterize = parameterize_ctor(i=num_layers-1, cond_channels=self.cond_channels)
 
         self.layers = [_layer(i) for i in range(num_layers)]
 
@@ -196,38 +167,6 @@ class CGlowFlowSR(GlowFlow):
             self.input_channels = input_channels
             input_shape = tf.TensorShape((None, *[None for i in range(self.dim)], self.input_channels))
             self.initialize(input_shape)
-
-    def _build_cond_fn(self, cond_shape, num_filters=64, kernel_size=3, num_blocks=4, num_resblocks=12):
-        from tensorflow.keras import Model
-        from tensorflow.keras.layers import Input, Conv2D, Conv3D, Concatenate, Activation, add, Lambda, Add
-        def Conv(dim, num_filters, kernel_size, **kwargs):
-            if dim==2:
-                return Conv2D(num_filters, kernel_size, dtype=tf.float32, **kwargs)
-            else:
-                return Conv3D(num_filters, kernel_size, dtype=tf.float32, **kwargs)
-
-        def _resnet_block(x, dim, num_filters, num_resblocks, base_name):
-            h = x
-            for i in range(num_resblocks):
-                h = Activation('relu')(h)
-                h = Conv(dim, num_filters, kernel_size, padding='same', name=f'{base_name}/conv{dim}d_{i}')(h)
-            h = add([x, h])
-            return h
-
-        dim = cond_shape.rank-2
-        y = Input(cond_shape[1:])
-
-        u_pre = Conv(dim, num_filters, kernel_size, padding='same')(y)
-
-        u = _resnet_block(u_pre, dim, num_filters, num_resblocks, f'cond_block_0')
-        #output = u
-        for i in range(1, num_blocks):
-            u = _resnet_block(u, dim, num_filters, num_resblocks, f'cond_block_{i}')
-            #output = Concatenate(axis=-1)([output, u])
-
-        #output = Concatenate(axis=-1)([output, u_pre])
-        model = Model(inputs=y, outputs=u, name='cond_fn')
-        return model
 
     def _initialize(self, input_shape):
         for layer in self.layers:

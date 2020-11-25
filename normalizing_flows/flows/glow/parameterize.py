@@ -9,7 +9,7 @@ class Parameterize(Transform):
     """
     Generalized base type for parameterizing a pre-specified density given some factored out latent variables.
     """
-    def __init__(self, num_parameters, num_filters, input_shape=None, cond_shape=0, name='parameterize', *args, **kwargs):
+    def __init__(self, num_parameters, num_filters, input_shape=None, cond_channels=0, name='parameterize', *args, **kwargs):
         """
         Base class constructor. Should not be directly invoked by callers.
 
@@ -18,10 +18,10 @@ class Parameterize(Transform):
         self.num_parameters = num_parameters
         self.num_filters = num_filters
         self.parameterizer = None
-        self.cond_shape = cond_shape
+        self.cond_channels = cond_channels
         super().__init__(*args, input_shape=input_shape, requires_init=True, name=name, **kwargs)
 
-    def _build_parameterizer_fn(self, z_shape, cond_shape=0):
+    def _build_parameterizer_fn(self, z_shape, cond_channels=0):
         """
         Builds a simple, convolutional neural network for parameterizing a distribution
         with 'num_parameters' parameters. Can be overridden by subclasses.
@@ -34,7 +34,7 @@ class Parameterize(Transform):
                 return Conv3D(num_filters, kernel_size, dtype=tf.float32, **kwargs)
 
         dim = z_shape.rank -2
-        shape = (*[None for _ in range(dim)], z_shape[-1] + cond_shape)
+        shape = (*[None for _ in range(dim)], z_shape[-1] + cond_channels)
         x = Input(shape, dtype=tf.float32)
         params = []
         for i in range(self.num_parameters):
@@ -54,7 +54,7 @@ class Parameterize(Transform):
     def _initialize(self, input_shape):
         if self.parameterizer is None:
             #self.log_scale = tf.Variable(tf.zeros((1,1,1,self.num_parameters*input_shape[-1])), name=f'{self.name}/log_scale')
-            self.parameterizer = self._build_parameterizer_fn(input_shape, cond_shape=self.cond_shape)
+            self.parameterizer = self._build_parameterizer_fn(input_shape, cond_channels=self.cond_channels)
 
     def _forward(self, x1, x2, **kwargs):
         raise NotImplementedError('missing implementation for Parameterize::_forward')

@@ -3,7 +3,7 @@ import tensorflow_probability as tfp
 import numpy as np
 from flows.flow import Flow
 from flows.transform import Transform
-#from normalizing_flows.flows.affine import BatchNorm
+from flows.networks.coupling_nn import coupling_nn
 from . import (
     InvertibleConv,
     ActNorm,
@@ -12,26 +12,25 @@ from . import (
     AffineCoupling,
     Parameterize,
     Gaussianize,
-    coupling_nn_glow
 )
 
-def glow_step(layer_index, coupling_nn_ctor=coupling_nn_glow(), name='glow_step'):
+def glow_step(layer_index, nn_ctor=coupling_nn(), name='glow_step'):
     norm = ActNorm(name=f'{name}_act_norm')# if act_norm else BatchNorm(name=f'{name}_batch_norm')
     invertible_conv = InvertibleConv(name=f'{name}_inv_conv')
-    affine_coupling = AffineCoupling(layer_index, nn_ctor=coupling_nn_ctor, name=f'{name}_affine_coupling')
+    affine_coupling = AffineCoupling(layer_index, nn_ctor=nn_ctor, name=f'{name}_affine_coupling')
     flow_steps = [norm, invertible_conv, affine_coupling]
     return Flow(flow_steps)
 
 def glow_layer(layer_index,
                parameterize: Parameterize,
                depth=4,
-               coupling_nn_ctor=coupling_nn_glow(),
+               nn_ctor=coupling_nn(),
                split_axis=-1,
                act_norm=True,
                name='glow_layer'):
     squeeze = Squeeze(name=f'{name}_squeeze')
     steps = Flow.uniform(depth, lambda i: glow_step(layer_index,
-                                                    coupling_nn_ctor=coupling_nn_ctor,
+                                                    nn_ctor=nn_ctor,
                                                     name=f'{name}_step{i}'))
     layer_steps = [squeeze, steps]
     if split_axis is not None:
@@ -56,7 +55,7 @@ class GlowFlow(Transform):
                  depth=4,
                  cond_shape=None,
                  parameterize_ctor=Gaussianize,
-                 coupling_nn_ctor=coupling_nn_glow(),
+                 coupling_nn_ctor=coupling_nn(),
                  act_norm=True,
                  name='glow_flow',
                  *args, **kwargs):
@@ -78,7 +77,7 @@ class GlowFlow(Transform):
             return glow_layer(i,
                               parameterize_ctor(name=f'{name}_layer{i}_param'),
                               depth=depth,
-                              coupling_nn_ctor=coupling_nn_ctor,
+                              nn_ctor=coupling_nn_ctor,
                               act_norm=act_norm,
                               split_axis=None if i == num_layers - 1 else -1,
                               name=f'{name}_layer{i}')
@@ -131,12 +130,12 @@ class GlowFlow(Transform):
 
     def _unflatten_z(self, z):
         assert self.input_shape is not None
-        shape = tf.shape(z)
-
+        shape = np.shape(z)
+        shape_x = z.shape[1]
         batch_size = shape[0]
         n_channels = self.input_shape[-1]
 
-        h = int(np.ceil(np.power(shape[1]//n_channels, 1./self.dim)))
+        h = int(np.ceil(np.power(shape_x//n_channels, 1./self.dim)))
         
         ndshape = [h for _ in range(self.dim)]
 

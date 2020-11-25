@@ -15,17 +15,17 @@ def gaussianize(x, mus, log_sigmas, inverse=tf.constant(False)):
         ldj = -tf.math.reduce_sum(log_sigmas, axis=[i for i in range(1, rank)])
     return z, ldj
 
-def cond_gaussianize(dim=2, min_filters=32, max_filters=32, *args, **kwargs):
-    class CondGaussianize(Parameterize):
+def CondGaussianize(dim=2, min_filters=32, max_filters=32, *args, **kwargs):
+    class _cond_gaussianize(Parameterize):
         """
         Implementation of parameterize for a Gaussian prior. Corresponds to the "Gaussianization" step in Glow (Kingma et al, 2018),
         with a conditional input.
         """
     
-        def __init__(self, i=0, cond_shape=None, input_shape=None, name='cond_gaussianize', *args, **kwargs):
-            self.cond_shape = cond_shape
+        def __init__(self, i=0, cond_channels=0, input_shape=None, name='cond_gaussianize', *args, **kwargs):
+            self.cond_channels = cond_channels
             self.num_filters = np.maximum(max_filters//((2**(dim-1))**i), min_filters)
-            super().__init__(*args, num_parameters=2, num_filters=self.num_filters, input_shape=input_shape, cond_shape=cond_shape, name=name, **kwargs)
+            super().__init__(*args, num_parameters=2, num_filters=self.num_filters, input_shape=input_shape, cond_channels=cond_channels, name=name, **kwargs)
             
         def _forward(self, x1, x2, **kwargs):
             assert 'y_cond' in kwargs, 'cond_gaussianize did not receive y_cond'
@@ -51,7 +51,7 @@ def cond_gaussianize(dim=2, min_filters=32, max_filters=32, *args, **kwargs):
             x = tf.random.normal(shape, dtype=tf.float32)
             normal = tfp.distributions.Normal(loc=0, scale=1)
     
-            cond_shape = tf.concat([shape[:-1], [self.cond_shape]], axis=-1)
+            cond_shape = tf.concat([shape[:-1], [self.cond_channels]], axis=-1)
             y_cond = normal.sample(cond_shape)
             z, fldj = self._forward(tf.zeros_like(x), x, y_cond=y_cond)
             x_, ildj = self._inverse(tf.zeros_like(x), z, y_cond=y_cond)
@@ -67,4 +67,5 @@ def cond_gaussianize(dim=2, min_filters=32, max_filters=32, *args, **kwargs):
         def param_count(self, _):
             return self.parameterizer.count_params()
 
-    return CondGaussianize    
+    return _cond_gaussianize
+        

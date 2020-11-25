@@ -11,7 +11,7 @@ class CondSplit(Transform):
     def __init__(self,
                  parameterize: Parameterize,
                  input_shape=None,
-                 cond_shape=None,
+                 cond_channels=None,
                  split_axis=-1, 
                  name='parameterize',
                  *args, **kwargs):
@@ -22,7 +22,7 @@ class CondSplit(Transform):
         """
         self.parameterize = parameterize
         self.split_axis = split_axis
-        self.cond_shape = cond_shape
+        self.cond_channels = cond_channels
         super().__init__(*args, input_shape=input_shape, requires_init=True, name=name, **kwargs)
         
     def _forward_shape(self, input_shape):
@@ -58,8 +58,9 @@ class CondSplit(Transform):
         x = normal.sample(shape)
 
         normal = tfp.distributions.Normal(loc=0, scale=1)
-        cond_shape = tf.concat([shape[:-1], [self.cond_shape]], axis=-1)
+        cond_shape = tf.concat([shape[:-1], [self.cond_channels]], axis=-1)
         y_cond = normal.sample(cond_shape)
+        print(y_cond.shape, flush=True)
 
         y, fldj = self._forward(x, y_cond=y_cond, **kwargs)
         y1, z2 = y
