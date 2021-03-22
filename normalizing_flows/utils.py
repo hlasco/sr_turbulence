@@ -43,34 +43,37 @@ class MyConfigParser(RawConfigParser):
         except NoOptionError:
             return None
 
-def get_inpt_channels(config):
-    config = config['training']
+def get_num_channels(config, where):
+    assert where in ['inputs', 'targets']
+    data_type = config['training']['data_type']                     
+    assert data_type in ['compressible', 'incompressible', 'dmh'], \
+           "Invalid turbulence type: {}. Use (compressible/incompressible/dmh)".format(data_type)
 
-    assert config['turb_type'] in ['compressible', 'incompressible'], \
-           "Invalid turbulence type: {}. Use (compressible/incompressible)".format(config['turb_type'])
+    config_ = config[f'{data_type}-dataset']
 
-    assert config['channel_type'] in ['s', 'vel', 'all'], \
-           "Invalid channel type: {}. Use (s/vel/all)".format(config['channel_type'])
 
-    if config['turb_type'] == 'incompressible':
-        assert config['channel_type'] in ['vel', 'all'], \
-               "Invalid channel_type for {} turbulence. Use (vel/all).".format(config['turb_type'])
+    if data_type == 'compressible':
+        assert config_[where] in ['s', 'vel', 'all'], \
+           "Invalid {} channel type: {}. Use (s/vel/all)".format(where, config_[where])
+        if config_['target'] == 's':
+            return 1
+        elif config_[where] == 'vel':
+            return 3
+        elif config_[where] == 'all':
+            return 4
+
+    if data_type == 'incompressible':
+        assert config_['targets'] in ['vx', 'vy', 'vz', 'all'], \
+               "Invalid {} channel_type for {} dataset. Use (vx/vy/vz/all).".format(where, data_type)
         return 3
 
-    if config['channel_type'] == 's':
-        return 1
-    elif config['channel_type'] == 'vel':
-        return 3
-    elif config['channel_type'] == 'all':
-        return 4
-
-def get_cond_channels(config):
-    config = config['training']
-
-    if config['turb_type'] == 'incompressible':
-        return 3
-    else:
-        return 4
+    if data_type == 'dmh':
+        assert config_['targets'] in ['dmh', 'gas'], \
+               "Invalid {} channel_type for {} dataset. Use (dmh/gas).".format(where, data_type)
+        if where=='inputs':
+            return 2
+        else:
+            return 1
 
 def get_kwargs(config, keys):
     kwargs = {}
@@ -87,10 +90,13 @@ def get_rundir(config):
                             'cond_filters', 'cond_resblocks', 'cond_blocks']).values()
     kernel_size = config.getint('flow','kernel_size')
     upfactor = int(2**config.getint('flow','upfactor'))
-    ctype = config['training']['channel_type']
-    lr_type = config['training']['lr_type']
-    run_dir = base_path + "/flow_{}X{}_{}_{}_{}_{}_{}_cond_{}_{}_{}_{}/".format(lr_type, upfactor, *k, ctype)
-    #run_dir = base_path + "/flow_{}_{}_{}_{}_cond_{}_{}_{}_{}/".format(*k1, *k2, ctype)
+    
+    data_type = config['training']['data_type']
+    config_dataset = config[f'{data_type}-dataset']
+    targets = config_dataset['targets']
+    inputs = config_dataset['inputs']
+
+    run_dir = base_path + "/flow_X{}_{}_{}_{}_{}_{}_cond_{}_{}_{}_data_{}_{}/".format(upfactor, *k, inputs, targets)
     return run_dir
 
 def get_bInit(config):
@@ -108,8 +114,9 @@ def get_model(config, restart=False, ckpt_num=0):
     upfactor = config.getint('flow','upfactor')
     num_layers = config.getint('flow','num_layers')
     rundir = get_rundir(config)
-    inpt_channels = get_inpt_channels(config)
-    cond_channels = get_cond_channels(config)
+                     
+    channels = get_num_channels(config, 'targets')
+    cond_channels = get_num_channels(config, 'inputs')
 
     kwargs_nn = get_kwargs(config,
          keys=['dim','min_filters', 'max_filters', 'num_blocks', 'kernel_size'])
@@ -118,15 +125,12 @@ def get_model(config, restart=False, ckpt_num=0):
     kwargs_cond = get_kwargs(config,
          keys=['dim', 'cond_filters', 'cond_resblocks', 'cond_blocks', 'kernel_size'])
     kwargs_cond['cond_channels'] = cond_channels
-    
-
 
     print("Building model:")
 
     coupling_ctor = coupling_nn(**kwargs_nn)
     cond_ctor = cond_nn(upfactor=upfactor, num_layers=num_layers, **kwargs_cond)
     parametrizer = CondGaussianize(**kwargs_nn)
-    #parametrizer = Gaussianize(**kwargs_nn)
 
     glow = Invert(CGlowFlowSR(**kwargs_flow, **kwargs_cond,
                               coupling_ctor=coupling_ctor,
@@ -137,7 +141,7 @@ def get_model(config, restart=False, ckpt_num=0):
     num_bins = config.getint('training', 'num_bins')
 
     prior = NormalPrior(loc=0.0, scale=1.0)
-    model = FlowLVM(glow, prior, dim=dim, num_bins=num_bins, input_channels=inpt_channels,
+    model = FlowLVM(glow, prior, dim=dim, num_bins=num_bins, input_channels=channels,
                     cond_channels=cond_channels, learning_rate=learning_rate, rundir=rundir)
     print("Model built with",model.param_count().numpy(),"parameters.", flush=True)
     model._init_checkpoint()
@@ -165,24 +169,41 @@ def get_ckpt_num(config):
 
 def get_dataset(config, strategy=tf.distribute.get_strategy()):
 
-    dset_dir = config.get('paths','dset_dir')
-    turb_type = config.get('training','turb_type')
+    
     upfactor = config.getint('flow','upfactor')
-    hr_patch_size = config.getint('training','hr_patch_size')
-    hr_sim_size = config.getint('training','hr_sim_size')
-    channel_type = config.get('training','channel_type')
+    data_type = config.get('training','data_type')
     batch_size = config.getint('training', 'batch_size')
-    lr_type = config.get('training', 'lr_type')
-    if turb_type == 'compressible':
-        mach = list(map(int, config['training']['mach'].split(',')))
+    
+    dset_section = f'{data_type}-dataset'
+
+    dset_dir = config.get(dset_section,'dset_dir')
+    inputs = config.get(dset_section,'inputs')
+    targets = config.get(dset_section,'targets')
+
+    if data_type == 'compressible':
+        mach = list(map(int, config[dset_section]['mach'].split(',')))
+        hr_patch_size = config.getint(dset_section,'hr_patch_size')
+        hr_sim_size = config.getint(dset_section,'hr_sim_size')
+        lr_type = config.get(dset_section, 'lr_type')
         if config.getint('flow','dim')== 3:
-            dset = get_dataset_compressible_3d(dset_dir, mach, hr_patch_size, hr_sim_size, upfactor, lr_type, channel_type, batch_size, strategy)
+            dset = get_dataset_compressible_3d(dset_dir, mach, hr_patch_size, hr_sim_size, upfactor, lr_type, targets, batch_size, strategy)
             return dset
         else:
             dset = get_dataset_compressible_2d(dset_dir, mach, hr_patch_size, hr_sim_size, upfactor, lr_type, channel_type, batch_size, strategy)
             return dset
-    else:
+
+    elif data_type == 'dmh':
+        assert config.getint('flow','dim')== 2, \
+               "Invalid dim for {} turbulence. Use (2).".format(config['data_type'])
+        redshifts = list(map(int, config[dset_section]['redshifts'].split(',')))
+        tilesize = config.getint(dset_section,'tilesize')
+        dset = get_dataset_dmh(dset_dir, redshifts, tilesize, inputs, targets, batch_size, strategy)
+        return dset
+    elif data_type == 'incompressible':
         raise ValueError("Incompressible dataset not implemented yet.")
+
+    else:
+        raise ValueError("Dataset not implemented yet.")
 
 def get_dataset_compressible_3d(dset_dir, mach, hr_ps, hr_sim_size, upfactor, lr_type, channel_type, batch_size, strategy):
 
@@ -294,8 +315,8 @@ def get_dataset_compressible_2d(dset_dir, mach, hr_ps, hr_sim_size, upfactor, lr
 
     def readH5(f):
         f = f.numpy()
-        ret_lr = np.zeros([num_patches**2*lr_sim_size,lr_ps,lr_ps,len(channels_lr)] )
-        ret_hr = np.zeros([num_patches**2*lr_sim_size,hr_ps,hr_ps,len(channels_hr)] )
+        ret_lr = np.zeros([num_patches**2*lr_sim_size,lr_ps,lr_ps,len(channels_lr)])
+        ret_hr = np.zeros([num_patches**2*lr_sim_size,hr_ps,hr_ps,len(channels_hr)])
         with h5py.File(f, 'r') as fi:
             att = dict(fi[lr_key].attrs)
             # Forgot to save mach number...
@@ -352,4 +373,94 @@ def get_dataset_compressible_2d(dset_dir, mach, hr_ps, hr_sim_size, upfactor, lr
     dataset = dataset.shuffle(num_patches**2*lr_sim_size*len(sim_list)).repeat()
     dataset = dataset.batch(batch_size*strategy.num_replicas_in_sync)
     dataset = strategy.experimental_distribute_dataset(dataset)
+    return dataset
+
+def get_dataset_dmh(dset_dir, redshifts, tilesize, inputs, targets, batch_size, strategy):
+    def randomize_tile(xd, xv, y):
+        nmir = np.random.randint(0, 2)
+        nrot = np.random.randint(0, 4)
+        if nmir:
+            xd = np.fliplr(xd)
+            xv = np.fliplr(xv)
+            y = np.fliplrt(y)
+
+        xd = np.rot90(xd, k=nrot)
+        xv = np.rot90(xv, k=nrot)
+        y = np.rot90(y, k=nrot)
+        return (xd, xv, y)
+    
+    def load_new_slice(dset_dir, redshifts, inputs, targets):
+        rz = np.random.choice(redshifts, 1)[0]
+        rx = np.random.choice(['x', 'y'], 1)[0]
+        ri = np.random.randint(0, 10)  # 10 slices each for FIREbox
+        q = np.random.randint(0, 49) # which sub-tile
+        xd = np.load('{}snapshot_{}/maps/p{}_{}_{}.d.{}.npy'.format(dset_dir, rz, inputs, rx, ri, q))
+        xv = np.load('{}snapshot_{}/maps/p{}_{}_{}.v.{}.npy'.format(dset_dir, rz, inputs, rx, ri, q))
+        yd = np.load('{}snapshot_{}/maps/p{}_{}_{}.d.{}.npy'.format(dset_dir, rz, targets, rx, ri, q))
+        maximum = xd.shape[0] - int(tilesize)
+        
+        return xd, xv, yd, maximum
+
+        #self.xd, self.xv, self.yd = self.randomize_tile(self.xd, self.xv, self.yd)
+
+
+    def _slice(maximum):
+        ptx, pty = np.random.randint(low=0, high=maximum, size=(2,))
+        return np.s_[ptx: ptx + tilesize, pty: pty + tilesize]
+    
+    def _read_files(x):
+        input_d, input_v, target_d = x.numpy()
+        xd = np.load(input_d)
+        xv = np.load(input_v)
+        yd = np.load(target_d)
+        
+        num_patches = (xd.shape[0]//tilesize)
+        xd = xd.reshape(*(xd.shape), 1)
+        xv = xv.reshape(*(xv.shape), 1)
+        yd = yd.reshape(*(yd.shape), 1)
+        
+        xd = tf.image.resize(xd, size=[128*num_patches, 128*num_patches])
+        xv = tf.image.resize(xv, size=[128*num_patches, 128*num_patches])
+        yd = tf.image.resize(yd, size=[128*num_patches, 128*num_patches])
+
+        ret_x = np.zeros([num_patches**2,128,128,1])
+        ret_y = np.zeros([num_patches**2,128,128,2])
+        
+        x = np.arange(0,xd.shape[0]//128,1)
+        ii, jj = np.meshgrid(x,x)
+        for i,j in zip(ii.flat, jj.flat):
+            idx = i + num_patches * j
+            sl = np.s_[i*128: (i+1)*128, j*128: (j+1)*128, 0]
+            ret_y[idx, :, :, 0] = yd[sl]
+            ret_y[idx, :, :, 1] = xv[sl]
+            ret_x[idx, :, :, 0] = xd[sl]
+        return ret_x, ret_y
+    
+    def read_files(x):
+        x, y = tf.py_function(_read_files, [x], (tf.float32, tf.float32))
+        ret = {'x': x, 'y':y}
+        return ret
+
+    input_d = [f'{dset_dir}snapshot_{r}/maps/p{inputs}_*_*.d.*.npy' for r in redshifts]
+    input_v = [f'{dset_dir}snapshot_{r}/maps/p{inputs}_*_*.v.*.npy' for r in redshifts]
+    target_d = [f'{dset_dir}snapshot_{r}/maps/p{targets}_*_*.d.*.npy' for r in redshifts]
+    
+    for i in range(len(redshifts)):
+        input_d[i] = sorted(glob.glob(input_d[i]))
+        input_v[i] = sorted(glob.glob(input_v[i]))
+        target_d[i] = sorted(glob.glob(target_d[i]))
+    
+    target_d = list(itertools.chain(*target_d))
+    input_v = list(itertools.chain(*input_v))
+    input_d = list(itertools.chain(*input_d))
+    
+    file_list = [[input_d[i], input_v[i], target_d[i]] for i in range(len(input_d))]
+    
+    random.shuffle(file_list)
+    
+    dataset = tf.data.Dataset.from_tensor_slices(file_list)
+    dataset = dataset.map(lambda x: read_files(x))
+    dataset = dataset.unbatch()
+    dataset = dataset.batch(batch_size*strategy.num_replicas_in_sync)
+    #dataset = strategy.experimental_distribute_dataset(dataset)
     return dataset
