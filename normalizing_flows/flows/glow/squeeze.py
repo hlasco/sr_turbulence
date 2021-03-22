@@ -91,6 +91,7 @@ class Squeeze(Transform):
         np.testing.assert_array_equal(tf.shape(y), fwd_shape)
         x_,_ = self._inverse(y, **kwargs)
         np.testing.assert_array_equal(tf.shape(x_), x.shape)
+        
         print('\t passed')
 
     def param_count(self, _):

@@ -60,7 +60,6 @@ class CondSplit(Transform):
         normal = tfp.distributions.Normal(loc=0, scale=1)
         cond_shape = tf.concat([shape[:-1], [self.cond_channels]], axis=-1)
         y_cond = normal.sample(cond_shape)
-        print(y_cond.shape, flush=True)
 
         y, fldj = self._forward(x, y_cond=y_cond, **kwargs)
         y1, z2 = y

@@ -20,10 +20,11 @@ class CondAffineCoupling(Transform):
             c_in  = input_shape[-1]//2 + self.cond_shape
             c_out = input_shape[-1]//2
 
-            self.log_scale_s = tf.Variable(tf.zeros((1,1,1,c_out), dtype=tf.float32), dtype=tf.float32, name=f'{self.name}/log_scale_s')
+            self.steep_s = tf.Variable(.5*tf.ones((1,1,1,c_out), dtype=tf.float32), dtype=tf.float32, name=f'{self.name}/steep_s')
+            self.scale_s = tf.Variable(.5*tf.ones((1,1,1,c_out), dtype=tf.float32), dtype=tf.float32, name=f'{self.name}/scale_s')
             self.log_scale_t = tf.Variable(tf.zeros((1,1,1,c_out), dtype=tf.float32), dtype=tf.float32, name=f'{self.name}/log_scale_t')
             dim = input_shape.rank-2
-            self.nn = self.nn_ctor(dim, self.layer, c_in, c_out, self.log_scale_s, self.log_scale_t, self.name)
+            self.nn = self.nn_ctor(dim, self.layer, c_in, c_out, self.steep_s, self.scale_s, self.log_scale_t, self.name)
 
     def _forward(self, x, **kwargs):
         if self.reverse:
@@ -79,4 +80,4 @@ class CondAffineCoupling(Transform):
         print('\t passed')
 
     def param_count(self, shape):
-        return tf.size(self.log_scale_s) + tf.size(self.log_scale_t) + self.nn.count_params()
+        return tf.size(self.scale_s) + tf.size(self.steep_s) + tf.size(self.log_scale_t) + self.nn.count_params()

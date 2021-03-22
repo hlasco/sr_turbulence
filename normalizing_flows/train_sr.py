@@ -43,9 +43,13 @@ if __name__ == "__main__":
     rundir = u.get_rundir(config)
 
     os.makedirs(rundir, exist_ok=True)
-    copyfile(args.config_file, rundir+'/config.ini')
+    try:
+        copyfile(args.config_file, rundir+'/config.ini')
+    except:
+        pass
     with strategy.scope():
         model = u.get_model(config)
+
     ckpt_num = u.get_ckpt_num(config)
     bInit = u.get_bInit(config)
 
@@ -53,9 +57,9 @@ if __name__ == "__main__":
     nsteps_tot = config.getint( 'training',  'nsteps')
     batch_size = config.getint('training', 'batch_size')
 
-    dset = u.get_dataset(config)
+    dset = u.get_dataset(config, strategy=strategy)
 
     n_ckpt = nsteps_tot // ckpt_freq
     print('\nStarting training:', flush=True)
     model.train(dset, batch_size=batch_size, steps_per_epoch=ckpt_freq, num_epochs=n_ckpt,
-                epoch_0=ckpt_num, conditional=True, init=bInit)
+                epoch_0=ckpt_num, conditional=True, init=bInit, strategy=strategy)

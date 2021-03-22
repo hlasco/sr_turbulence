@@ -20,9 +20,8 @@ class FlowLVM(TrackableModule):
                  cond_channels=None,
                  num_bins=None,
                  cond_fn=None,
-                 optimizer_flow=tf.keras.optimizers.Adam(lr=1.0E-4),
-                 optimizer_cond=None,
-                 clip_grads=1.0,
+                 learning_rate=1e-4,
+                 clip_grads=.5,
                  rundir='',
                  name='flvm'):
         """
@@ -34,13 +33,13 @@ class FlowLVM(TrackableModule):
         num_bins      : for discrete input spaces: number of discretized bins; i.e. num_bins = 2^(num_bits)
         cond_fn       : the conditioning function, for conditional mode
         optimizer_flow: optimizer to use during training the full model
-        optimizer_cond: optimizer to use during training of the conditioning network only
         clip_grads    : If not None and > 0, the gradient clipping ratio for clip_by_global_norm;
                         otherwise, no gradient clipping is applied
         """
+        #strategy=tf.distribute.MirroredStrategy()
+        optimizer_flow = tf.keras.optimizers.Adam(lr=learning_rate)
         super().__init__({'optimizer_flow': optimizer_flow}, name=name)
-        if optimizer_cond is not None:
-            super().__init__({'optimizer_cond': optimizer_cond}, name=name)
+
         self.rundir=rundir
         self.prior = prior
         self.transform = transform
@@ -48,7 +47,6 @@ class FlowLVM(TrackableModule):
         self.num_bins = num_bins
 
         self.optimizer_flow = optimizer_flow
-        self.optimizer_cond = optimizer_cond
         self.clip_grads = clip_grads
         self.scale_factor = np.log2(num_bins) if num_bins is not None else 0.0
         self.input_channels = input_channels
@@ -64,31 +62,18 @@ class FlowLVM(TrackableModule):
             self.transform.initialize(input_shape)
             self.cond_fn = self.transform._cond_fn
 
-    #@tf.function
     def _preprocess(self, x):
         if self.num_bins is not None:
             x += tf.random.uniform(x.shape, -.5/self.num_bins, .5/self.num_bins, dtype=tf.float32)
-        #x += tf.random.normal(x.shape, 0, 0.01, dtype=tf.float32)
         return x
 
-    #@tf.function
     def eval_cond(self, x_true, y, **kwargs):
-        z = self.prior.sample(x_true.shape)
+        z = self.prior.sample(x_true.shape)*0
         x_pred, _ = self.transform.forward(z, y_cond=y, **kwargs)
-        loss_s = 0
-        loss_v = 0
-        if x_pred.shape[-1]<=3:
-            _, spec_v_pred = utils.spectrum3d(x_pred, field_type='vel')
-            _, spec_v_true = utils.spectrum3d(x_true, field_type='vel')
-            loss_v = (tf.math.log(spec_v_true)-tf.math.log(spec_v_pred))/tf.math.log(spec_v_true)
-            loss_v = tf.math.reduce_sum(tf.abs(loss_v), axis=1)
-        if x_pred.shape[-1]!=3:
-            _, spec_s_pred = utils.spectrum3d(x_pred, field_type='s')
-            _, spec_s_true = utils.spectrum3d(x_true, field_type='s')
-            loss_s = (tf.math.log(spec_s_true)-tf.math.log(spec_s_pred))/tf.math.log(spec_s_true)
-            loss_s = tf.math.reduce_sum(tf.abs(loss_s), axis=1)
+        diff = x_true-x_pred
+        loss = tf.math.reduce_mean(tf.abs(diff), axis=[i for i in range(1,diff.shape.rank)])
 
-        return loss_s + loss_v
+        return loss
 
     def eval_batch(self, x, batch_size, **flow_kwargs):
         assert self.input_shape is not None, 'model not initialized'
@@ -126,21 +111,22 @@ class FlowLVM(TrackableModule):
         assert self.input_shape is not None, 'model not initialized'
         nll, nldj, prior_log_probs, y_loss = self.eval_batch(x, batch_size, **flow_kwargs)
         #reg_loss = self.transform._regularization_loss()
-        loss_flow = nll #+ y_loss + reg_loss
+        loss_flow = nll #+ y_loss #+ reg_loss
         train_var = self.trainable_variables
 
         gradients = tf.gradients(loss_flow, train_var)
         if self.clip_grads:
             gradients, grad_norm = tf.clip_by_global_norm(gradients, self.clip_grads)
-        self.optimizer_flow.apply_gradients(zip(gradients, train_var))
 
-        return loss_flow, y_loss, nll, nldj, prior_log_probs
+        self.optimizer_flow.apply_gradients(zip(gradients, train_var))
+        ret = tf.stack([loss_flow, y_loss, nll, nldj, prior_log_probs])
+        return ret
 
     def train(self, train_data: tf.data.Dataset, batch_size, steps_per_epoch,
-              num_epochs=1, epoch_0=0, conditional=False, init=False, 
+              num_epochs=1, epoch_0=0, conditional=False, init=False, strategy=tf.distribute.get_strategy(),
               **flow_kwargs):
-        strategy=tf.distribute.get_strategy()
         steps_per_epoch = steps_per_epoch
+        global_batch_size = batch_size*strategy.num_replicas_in_sync
         init = tf.constant(init) # init variable for data-dependent initialization
         iterator = iter(train_data)
         hist = dict()
@@ -153,10 +139,11 @@ class FlowLVM(TrackableModule):
                     if conditional:
                         flow_kwargs['y_cond'] = batch['y']
                     else:
-                        flow_kwargs['y_cond'] = tf.repeat(None, batch_size, axis=0)
+                        flow_kwargs['y_cond'] = tf.repeat(None, global_batch_size, axis=0)
                     flow_kwargs['init']=init
-                    per_replica_metrics = strategy.run(self.train_batch, args=(x, batch_size,), kwargs=flow_kwargs)
-                    loss_flow, y_loss, nll, nldj, p = strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_metrics, axis=None)
+                    per_replica_metrics = strategy.run(self.train_batch, args=(x, global_batch_size,), kwargs=flow_kwargs)
+                    per_replica_metrics = strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_metrics, axis=None)
+                    loss_flow, y_loss, nll, nldj, p = per_replica_metrics
 
                     init=tf.constant(False)
                     utils.update_metrics(hist, lf=loss_flow.numpy(), ly=y_loss.numpy(), p=p.numpy(), nldj=nldj.numpy())
@@ -171,33 +158,18 @@ class FlowLVM(TrackableModule):
                         hist = dict()
             self.save(self.rundir + 'model')
 
-    def evaluate(self, validation_data: tf.data.Dataset, validation_steps, conditional=False, **flow_kwargs):
-        validation_data = validation_data.take(validation_steps)
-        with tqdm(total=validation_steps) as prog:
-            hist = dict()
-            for batch in validation_data:
-                if conditional:
-                    x, y = batch
-                    nll, ldj, y_loss  = self.eval_batch(x, y_cond=y, **flow_kwargs)
-                else:
-                    x = batch
-                    nll, ldj, y_loss  = self.eval_batch(x, **flow_kwargs)
-                utils.update_metrics(hist, nll=nll.numpy())
-                prog.update(1)
-                prog.set_postfix({k: v[0] for k,v in hist.items()})
-
-    def encode(self, x, y_cond=None):
+    def encode(self, x, y_cond=None, **kwargs):
         if y_cond is not None:
-            z, _ = self.transform.inverse(x, y_cond=y_cond)
+            z, _ = self.transform.inverse(x, y_cond=y_cond, **kwargs)
         else:
-            z, _ = self.transform.inverse(x)
+            z, _ = self.transform.inverse(x,**kwargs)
         return z
 
-    def decode(self, z, y_cond=None):
+    def decode(self, z, y_cond=None, **kwargs):
         if y_cond is not None:
-            x, _ = self.transform.forward(z, y_cond=y_cond)
+            x, _ = self.transform.forward(z, y_cond=y_cond, **kwargs)
         else:
-            x, _ = self.transform.forward(z)
+            x, _ = self.transform.forward(z, **kwargs)
         return x
 
     def sample(self, n=1, shape=32, y_cond=None, prior_loc=0.0, prior_scale=1.0):
@@ -206,9 +178,9 @@ class FlowLVM(TrackableModule):
         event_ndims = self.prior.event_shape.rank
         shape = (1,*[shape for _ in range(self.dim)], self.input_channels)
         z_shape = shape[1:]
-
-        z = self.prior.sample((n*batch_size,*z_shape[:len(z_shape)-event_ndims]))
-        z = tf.reshape(z, (n*batch_size, -1))
+        
+        z = self.prior.sample((n*batch_size,*z_shape))
+        #z = tf.reshape(z, (n*batch_size, -1))
         if y_cond is not None:
             # repeat y_cond n times along batch axis
             y_cond = tf.repeat(y_cond, n, axis=0)

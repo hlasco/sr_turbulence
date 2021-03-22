@@ -205,7 +205,6 @@ class GlowFlow(Transform):
         return ret
 
     def _get_trainable_variables(self, **kwargs):
-        print('hi')
         if 'cond' in kwargs:
             var = self.cond_fn.trainable_variables()
 

@@ -28,7 +28,6 @@ class ActNorm(Transform):
         super().__init__(*args,
                          input_shape=input_shape,
                          requires_init=True,
-                         has_constant_ldj=True,
                          name=name, **kwargs)
 
     def _initialize(self, input_shape):

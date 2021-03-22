@@ -23,19 +23,21 @@ class InvertibleConv(Transform):
             c = input_shape[-1]
             ortho_init = tf.initializers.Orthogonal()
             if rank==4:
-                self.W = ortho_init((1,1,c,c))
+                W = ortho_init((1,1,c,c))
             else:
-                self.W = ortho_init((1,1,1,c,c))
+                W = ortho_init((1,1,1,c,c))
+
+            self.W = tf.Variable(W, name=f'{self.name}/W')
             #self.W = tf.reshape(tf.eye(c,c), (1,1,c,c))
     
-    def _forward(self, x):
+    def _forward(self, x, **kwargs):
         self._initialize(tf.shape(x).shape)
         y = conv(x, self.W, padding='SAME')
         fldj = tf.math.log(tf.math.abs(tf.linalg.det(self.W)))
         fldj = tf.squeeze(fldj)
         return y, tf.broadcast_to(fldj, (tf.shape(x)[0],))
     
-    def _inverse(self, y):
+    def _inverse(self, y, **kwargs):
         #self._init_vars(y)
         self._initialize(tf.shape(y).shape)
         W_inv = tf.linalg.inv(self.W)
@@ -43,6 +45,22 @@ class InvertibleConv(Transform):
         ildj = tf.math.log(tf.math.abs(tf.linalg.det(W_inv)))
         ildj = tf.squeeze(ildj)
         return x, tf.broadcast_to(ildj, (y.shape[0],))
+
+    def _test(self, shape, **kwargs):
+        print('Testing', self.name)
+        print(self.W)
+        normal = tfp.distributions.Normal(loc=0.0, scale=1.0)
+        x = normal.sample(shape)
+        y, fldj = self._forward(x)
+        x_, ildj = self._inverse(y)
+        #np.testing.assert_array_almost_equal(x_, x, decimal=2)
+        #np.testing.assert_array_equal(ildj, -fldj)
+        err_x = tf.reduce_mean(x_-x)
+        err_ldj = tf.reduce_mean(ildj+fldj)
+        print("\tError on forward inverse pass:")
+        print("\t\tx-F^{-1}oF(x):", err_x.numpy())
+        print("\t\tildj+fldj:", err_ldj.numpy())
+        print('\t passed')
 
     def param_count(self, _):
         return tf.size(self.W)

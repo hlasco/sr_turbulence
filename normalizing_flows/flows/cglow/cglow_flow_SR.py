@@ -5,6 +5,10 @@ from flows.flow import Flow
 from flows.transform import Transform
 from flows.networks.coupling_nn import coupling_nn
 from flows.networks.cond_nn import cond_nn
+
+from tensorflow.keras.layers import UpSampling3D, AveragePooling3D
+from tensorflow.keras.layers import UpSampling2D, AveragePooling2D
+
 from . import (
     GlowFlow,
     InvertibleConv,
@@ -19,52 +23,6 @@ from . import (
     Parameterize,
 )
 
-def getMesh(dim, s, x_min, x_max):
-    x0, x1, x2 = tf.meshgrid(
-        tf.linspace(x_min[0], x_max[0], num=s[0]),
-        tf.linspace(x_min[1], x_max[1], num=s[1]),
-        tf.linspace(x_min[2], x_max[2], num=s[2]),
-        indexing='ij')
-    return x0, x1, x2
-
-def reshape_volume(inpt, output_shape):
-    s = inpt.shape
-    new_s = [s[0], output_shape[0], output_shape[1], output_shape[2], s[4]]
-    dim = len(output_shape)
-
-    x_min = [0. for i in range(dim)]
-    x_max = [1. for i in range(dim)]
-
-    x0, x1, x2 = getMesh(dim, s[1:-1], x_min, x_max)
-    y0, y1, y2 = getMesh(dim, output_shape, x_min, x_max)
-
-    y = tf.stack([y0,y1,y2], axis=-1)
-    y = tf.reshape(y, (-1,3))
-
-    ret = tfp.math.batch_interp_regular_nd_grid(y, x_min, x_max, inpt, axis=-4)
-    ret = tf.reshape(ret, shape=new_s)
-    return ret
-
-@tf.function
-def reshape_cond(y_cond, i_layer, upfactor):
-    shape = tf.shape(y_cond)
-    newshape = shape[1:-1]
-    fac =  2.**upfactor/2**(i_layer+1)
-    dim = y_cond.shape.rank-2
-    if fac==1:
-        return y_cond
-    elif fac>1:
-        fac = int(fac)
-        newshape = tf.cast(fac * shape[1:-1], dtype=tf.int32)
-    elif fac<1:
-        fac = int(1./fac)
-        newshape = tf.cast(shape[1:-1]//fac, dtype=tf.int32)
-    if dim==2:
-        y_reshaped = tf.image.resize(y_cond, newshape)
-    else:
-        y_reshaped = reshape_volume(y_cond, newshape)
-    return y_reshaped
-
 def cglow_SR_step(depth_index, layer_index, cond_channels, upfactor, nn_ctor=coupling_nn(), name='cglow_SR_step'):
 
     norm = ActNorm(name=f'{name}_act_norm')
@@ -73,7 +31,7 @@ def cglow_SR_step(depth_index, layer_index, cond_channels, upfactor, nn_ctor=cou
                                 name=f'{name}_affine_injector')
 
 
-    if layer_index < 5 :
+    if True:
         inv_conv = InvertibleConv(name=f'{name}_inv_conv')
         coupling = CondAffineCoupling(layer_index, cond_channels, nn_ctor=nn_ctor,
                                 name=f'{name}_cond_affine_coupling', reverse=False)
@@ -98,8 +56,8 @@ def cglow_SR_layer(layer_index, cond_channels, upfactor,
                                                         nn_ctor=nn_ctor,
                                                         name=f'{name}_step{i}'))
 
-    norm = ActNorm(name=f'{name}_act_norm')
-    inv_conv = InvertibleConv(name=f'{name}_inv_conv')
+    norm = ActNorm(name=f'{name}_trs_act_norm')
+    inv_conv = InvertibleConv(name=f'{name}_trs_inv_conv')
 
     layer_steps = [squeeze, norm, inv_conv, steps]
     if split_axis is not None:
@@ -129,7 +87,7 @@ class CGlowFlowSR(GlowFlow):
         """
         Creates a new Glow normalizing flow with the given configuration.
         dim            : the spatial dimension of the input x
-        input_channels : the channel dimension of the input x; 
+        input_channels : the channel dimension of the input x;
                          can be provided here or at a later time to 'initialize'
         num_layers     : number of "layers" in the multi-scale Glow architecture
         depth          : number of glow steps per layer
@@ -139,8 +97,9 @@ class CGlowFlowSR(GlowFlow):
         act_norm    : if true, use act norm in Glow layers; otherwise, use batch norm
         """
         self.dim = dim
+
         self.cond_fn = cond_ctor()
-        self.cond_channels = self.cond_fn.layers[-1].output_shape[-1]
+        self.cond_channels = self.cond_fn.outputs[0].shape[-1]
 
         def _layer(i):
             """Builds layer i; omits split op for final layer"""
@@ -184,18 +143,16 @@ class CGlowFlowSR(GlowFlow):
 
         for i in range(self.num_layers-1):
             layer = self.layers[i]
-            u_reshaped = reshape_cond(u, i, self.upfactor)
-            (x_i, z_i), fldj_i = layer.forward(x_i, y_cond=u_reshaped)
+            (x_i, z_i), fldj_i = layer.forward(x_i, y_cond=u[i])
             fldj += fldj_i
             zs.append(z_i)
         # final layer
 
-        u_reshaped = reshape_cond(u, self.num_layers-1, self.upfactor)
-        x_i, fldj_i = self.layers[-1].forward(x_i, y_cond=u_reshaped)
+        x_i, fldj_i = self.layers[-1].forward(x_i, y_cond=u[-1])
         fldj += fldj_i
         # Gaussianize (parameterize) final x_i
         h = tf.zeros_like(x_i)
-        z_i, fldj_i = self.parameterize.forward(h, x_i, y_cond=u_reshaped)
+        z_i, fldj_i = self.parameterize.forward(h, x_i, y_cond=u[-1])
         fldj += fldj_i
         zs.append(z_i)
         if return_zs:
@@ -212,16 +169,15 @@ class CGlowFlowSR(GlowFlow):
         u = self.cond_fn(kwargs['y_cond'])
 
         ildj = 0.0
-        u_reshaped = reshape_cond(u, self.num_layers-1, self.upfactor)
-        x_i, ildj_i = self.parameterize.inverse(h, zs[-1], y_cond=u_reshaped)
+        x_i, ildj_i = self.parameterize.inverse(h, zs[-1], y_cond=u[-1])
         ildj += ildj_i
 
-        x_i, ildj_i = self.layers[-1].inverse(x_i, y_cond=u_reshaped)
+        x_i, ildj_i = self.layers[-1].inverse(x_i, y_cond=u[-1])
         ildj += ildj_i
         for i in range(self.num_layers-1):
-            layer = self.layers[self.num_layers-i-2]
-            u_reshaped = reshape_cond(u, self.num_layers-i-2, self.upfactor)
-            x_i, ildj_i = layer.inverse(x_i, zs[-i-2], y_cond=u_reshaped)
+            i_inv = self.num_layers-i-2
+            layer = self.layers[i_inv]
+            x_i, ildj_i = layer.inverse(x_i, zs[i_inv], y_cond=u[i_inv])
             ildj += ildj_i
         return x_i, ildj
 

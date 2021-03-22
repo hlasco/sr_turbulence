@@ -4,14 +4,14 @@ import numpy as np
 from flows.transform import Transform
 from . import Parameterize
 
-def gaussianize(x, mus, log_sigmas, inverse=tf.constant(False)):
+def gaussianize(x, mus, sigmas, inverse=tf.constant(False)):
     rank = x.shape.rank
+    ldj = tf.math.reduce_sum(tf.math.log(sigmas), axis=[i for i in range(1, rank)])
     if inverse:
-        z = tf.math.exp(log_sigmas)*x + mus
-        ldj = tf.math.reduce_sum(log_sigmas, axis=[i for i in range(1, rank)])
+        z = x/sigmas - mus
+        ldj *= -1
     else:
-        z = (x - mus)*tf.math.exp(-log_sigmas)
-        ldj = -tf.math.reduce_sum(log_sigmas, axis=[i for i in range(1, rank)])
+        z = (x + mus)*sigmas
     return z, ldj
 
 def Gaussianize(dim=2, min_filters=32, max_filters=32, *args, **kwargs):
@@ -27,14 +27,14 @@ def Gaussianize(dim=2, min_filters=32, max_filters=32, *args, **kwargs):
             
         def _forward(self, x1, x2, **kwargs):
             params = self.parameterizer(x1)
-            mus, log_sigmas = params[...,0::2], params[...,1::2]
-            z2, fldj = gaussianize(x2, mus, log_sigmas)
+            mus, sigmas = tf.split(params, 2, axis=-1)
+            z2, fldj = gaussianize(x2, mus, sigmas)
             return z2, fldj
         
         def _inverse(self, x1, z2, **kwargs):
             params = self.parameterizer(x1)
-            mus, log_sigmas = params[...,0::2], params[...,1::2]
-            x2, ildj = gaussianize(z2, mus, log_sigmas, inverse=tf.constant(True))
+            mus, sigmas = tf.split(params, 2, axis=-1)
+            x2, ildj = gaussianize(z2, mus, sigmas, inverse=tf.constant(True))
             return x2, ildj
     
         def _test(self, shape, **kwargs):

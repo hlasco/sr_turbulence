@@ -43,14 +43,13 @@ def invertible_1x1_conv(x, L, U, P, log_d, sgn_d, inverse=tf.constant(False)):
     return y, ldj
 
 class InvertibleConv(Transform):
-    def __init__(self, input_shape=None, alpha=1.0E-4, name='invertible_1x1_conv', *args, **kwargs):
+    def __init__(self, input_shape=None, alpha=1.0E-4, name='invertible_1x1_conv_lu', *args, **kwargs):
         self.alpha = alpha
         self.init = False
         super().__init__(*args,
                          input_shape=input_shape,
                          name=name,
                          requires_init=True,
-                         has_constant_ldj=True,
                          **kwargs)
 
     def _initialize(self, input_shape):
@@ -69,9 +68,9 @@ class InvertibleConv(Transform):
             # initialize variables
             self.input_shape = input_shape
             self.P = tf.Variable(np.expand_dims(p, axis=0).astype(np.float32), trainable=False, name=f'{self.name}/P')
-            self.L = tf.Variable(np.expand_dims(l, axis=0).astype(np.float32), name=f'{self.name}/L')
-            self.U = tf.Variable(np.expand_dims(u, axis=0).astype(np.float32), name=f'{self.name}/U')
-            self.log_d = tf.Variable(np.expand_dims(log_d, axis=0).astype(np.float32), name=f'{self.name}/log_d')
+            self.L = tf.Variable(np.expand_dims(l, axis=0).astype(np.float32), trainable=True, name=f'{self.name}/L')
+            self.U = tf.Variable(np.expand_dims(u, axis=0).astype(np.float32), trainable=True, name=f'{self.name}/U')
+            self.log_d = tf.Variable(np.expand_dims(log_d, axis=0).astype(np.float32), trainable=True, name=f'{self.name}/log_d')
             self.sgn_d = tf.Variable(np.expand_dims(sgn_d, axis=0).astype(np.float32), trainable=False, name=f'{self.name}/sgn_d')
             #self.tril_mask = tf.constant(np.tril(np.ones((1,c,c)), k=-1), dtype=tf.float32)
             self.init = True

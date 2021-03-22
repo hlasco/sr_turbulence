@@ -69,7 +69,8 @@ def write_logs(metric_dict, num_step, rundir):
         writer = csv.writer(f)
         writer.writerow(values)
 
-
+def hann(x):
+    return .5*(1 - tf.math.cos(2*np.pi*x))
 
 def spectrum3d(fields, field_type='vel', bFac=True):
     if field_type=='vel':
@@ -82,9 +83,9 @@ def spectrum3d(fields, field_type='vel', bFac=True):
         nb, nx, ny, nz = s.shape
     
     # Kill fields at boundaries to get a periodoc box
-    x = tf.linspace(-np.pi/2, np.pi/2, nx)
+    x = tf.linspace(0., 1., nx)
     x, y, z = tf.meshgrid(x, x, x)
-    fac = tf.math.cos(x)*tf.math.cos(y)*tf.math.cos(z)
+    fac = hann(x)*hann(y)*hann(z)
 
     Kk = tf.zeros((nx,ny,nz))#( (nx//2+1, ny//2+1, nz//2+1))
     if field_type=='vel':
@@ -141,3 +142,4 @@ def fft_comp(u):
     ret = tf.signal.fftshift(tf.signal.fft3d(u))
     ret = ret/(nx*ny*nz)
     return tf.math.abs(ret**2)
+

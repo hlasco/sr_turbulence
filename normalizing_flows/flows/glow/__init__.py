@@ -1,5 +1,5 @@
 from .act_norm import ActNorm
-from .invertible_conv_lu import InvertibleConv
+from .invertible_conv import InvertibleConv
 from .squeeze import Squeeze
 from .parameterize import Parameterize
 from .gaussianize import Gaussianize, LogGaussianize
