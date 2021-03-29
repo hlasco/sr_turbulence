@@ -26,14 +26,14 @@ class InvertibleConv(Transform):
                 W = ortho_init((1,1,c,c))
             else:
                 W = ortho_init((1,1,1,c,c))
-
             self.W = tf.Variable(W, name=f'{self.name}/W')
-            #self.W = tf.reshape(tf.eye(c,c), (1,1,c,c))
     
     def _forward(self, x, **kwargs):
         self._initialize(tf.shape(x).shape)
         y = conv(x, self.W, padding='SAME')
-        fldj = tf.math.log(tf.math.abs(tf.linalg.det(self.W)))
+        w_64 = tf.cast(self.W, tf.float64)
+        fldj = tf.math.log(tf.math.abs(tf.linalg.det(w_64))) * np.prod(x.shape[1:-1])
+        fldj = tf.cast(fldj, tf.float32) 
         fldj = tf.squeeze(fldj)
         return y, tf.broadcast_to(fldj, (tf.shape(x)[0],))
     
@@ -42,7 +42,9 @@ class InvertibleConv(Transform):
         self._initialize(tf.shape(y).shape)
         W_inv = tf.linalg.inv(self.W)
         x = conv(y, W_inv, padding='SAME')
-        ildj = tf.math.log(tf.math.abs(tf.linalg.det(W_inv)))
+        w_64 = tf.cast(self.W, tf.float64)
+        ildj = -tf.math.log(tf.math.abs(tf.linalg.det(w_64))) * np.prod(x.shape[1:-1])
+        ildj = tf.cast(ildj, tf.float32) 
         ildj = tf.squeeze(ildj)
         return x, tf.broadcast_to(ildj, (y.shape[0],))
 
